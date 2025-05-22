@@ -152,6 +152,15 @@ dmypy.json
 # Cython debug symbols
 cython_debug/
 
+ngx-stock-6790b26a4e52.json
+*.pyc
+
+.DS_Store
+*.env
+dashboard.py
+styling_utils.py
+.idea/*
+
 # PyCharm
 #  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
 #  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
