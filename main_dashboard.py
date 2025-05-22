@@ -1,16 +1,15 @@
-# main_dashboard.py
+
 import streamlit as st
-import pandas as pd
-import plotly.express as px  # Make sure this import is here
+import plotly.express as px
 from streamlit_autorefresh import st_autorefresh
 
 from config import (
     STOCK_ID_MAPPING, REFRESH_INTERVAL_SECONDS, COLS_TO_DISPLAY,
     CURRENCY_SYMBOL  # Assuming COLS_TO_DISPLAY will be adjusted
 )
-# data_loader.py now creates 'P/L % Visual'
+
 from data_loader import load_live_data_from_gsheet, fetch_historical_data, fetch_market_status
-# styling_utils.py is no longer needed for the main table if we don't use Styler for it
+
 from refresh_utils import check_auto_refresh_conditions
 
 st.set_page_config(layout="wide")
@@ -79,7 +78,7 @@ if not live_df.empty:
             st.metric(label=f"Total Profit/Loss ({CURRENCY_SYMBOL})", value="", delta=f"{total_profit_loss_val:,.2f}")
     st.markdown("---")
 
-    # --- Historical Price Chart with Chart Type Selection ---
+
     st.header("Historical Price Chart")
 
     # Chart type selection
@@ -110,7 +109,7 @@ if not live_df.empty:
                     if fig:
                         fig.update_layout(xaxis_title="Date", yaxis_title=f"Price ({CURRENCY_SYMBOL})")
                         st.plotly_chart(fig, use_container_width=True)
-                # else: # fetch_historical_data already shows errors
+
             else:
                 st.error(f"NGX chart ID not found for {selected_symbol} in `config.py`.")
 else:

@@ -25,31 +25,17 @@ def format_pl_with_arrow_for_dataframe(val):
 @st.cache_data(ttl=DATA_CACHE_TTL)
 def load_live_data_from_gsheet():
     try:
-        # creds = ServiceAccountCredentials.from_json_keyfile_name(CREDS_FILE, SCOPE)
+
         creds = None
-        # Try to load credentials from Streamlit Secrets first (for deployment)
         if hasattr(st, 'secrets') and "gcp_service_account" in st.secrets:
-            # st.secrets gives a SecretSection, convert to dict for from_json_keyfile_dict
             creds_dict = {}
             for key, val in st.secrets.gcp_service_account.items():
                 creds_dict[key] = val
-            # Ensure private_key newlines are handled correctly if st.secrets mangles them.
-            # Often, storing private_key with literal \n in secrets UI works.
-            # Or replacing escaped newlines:
-            # if 'private_key' in creds_dict:
-            #    creds_dict['private_key'] = creds_dict['private_key'].replace('\\n', '\n')
-
             creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, SCOPE)
-            # For newer gspread with google-auth:
-            # creds = service_account.Credentials.from_service_account_info(creds_dict, scopes=SCOPE)
-            st.info("Using credentials from Streamlit Secrets.")  # For debugging during deployment
         else:
-            # Fallback to local JSON file (for local development)
-            from config import CREDS_FILE  # Import CREDS_FILE here for local use
-            st.info(f"Using local credentials file: {CREDS_FILE}")  # For local debugging
+
+            from config import CREDS_FILE
             creds = ServiceAccountCredentials.from_json_keyfile_name(CREDS_FILE, SCOPE)
-            # For newer gspread with google-auth:
-            # creds = service_account.Credentials.from_service_account_file(CREDS_FILE, scopes=SCOPE)
 
         if not creds:
             st.error("Failed to load Google Sheets credentials.")
