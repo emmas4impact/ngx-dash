@@ -2,9 +2,11 @@
 import streamlit as st
 import plotly.express as px
 from streamlit_autorefresh import st_autorefresh
+from datetime import datetime # <<< Ensure datetime is imported
+import pytz
 
 from config import (
-    STOCK_ID_MAPPING, REFRESH_INTERVAL_SECONDS, COLS_TO_DISPLAY,
+    STOCK_ID_MAPPING, REFRESH_INTERVAL_SECONDS, COLS_TO_DISPLAY,GMT_OFFSET_FOR_REFRESH,
     CURRENCY_SYMBOL  # Assuming COLS_TO_DISPLAY will be adjusted
 )
 
@@ -19,11 +21,30 @@ market_status = fetch_market_status()
 st.subheader(f"Market Status: {market_status}")
 st.sidebar.markdown("---")
 
+try:
+
+    target_tz_str_for_display = f'Etc/GMT-{GMT_OFFSET_FOR_REFRESH}'
+    target_tz_for_display = pytz.timezone(target_tz_str_for_display)
+    now_in_target_tz = datetime.now(target_tz_for_display)
+    last_refreshed_display_text = f"Last data update: {now_in_target_tz.strftime('%Y-%m-%d %H:%M:%S %Z')}"
+    st.sidebar.caption(last_refreshed_display_text) # Display it in the sidebar
+except Exception as e:
+    st.sidebar.caption(f"Timezone info error: {e}")
 
 
-if check_auto_refresh_conditions(market_status):
+should_refresh = check_auto_refresh_conditions(market_status)
+
+if should_refresh:
     st_autorefresh(interval=REFRESH_INTERVAL_SECONDS * 1000, key="dashboard_autorefresh")
+    st.sidebar.caption(f"Auto-refresh is ON (every {REFRESH_INTERVAL_SECONDS // 60} mins).")
+else:
+    st.sidebar.caption("Auto-refresh is OFF based on current conditions.")
+
 st.markdown("---")
+
+# if check_auto_refresh_conditions(market_status):
+#     st_autorefresh(interval=REFRESH_INTERVAL_SECONDS * 1000, key="dashboard_autorefresh")
+# st.markdown("---")
 
 st.sidebar.header("Stock ID Mapping for Charts")
 st.sidebar.info("Ensure `STOCK_ID_MAPPING` in `config file` is correct.")
