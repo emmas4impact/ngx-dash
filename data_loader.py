@@ -1,4 +1,3 @@
-# data_loader.py
 
 import streamlit as st
 import pandas as pd
@@ -52,12 +51,11 @@ def load_live_data_from_gsheet():
         df = pd.DataFrame(data)
 
         if 'P/L %' in df.columns:
-            if df['P/L %'].dtype == 'object' or isinstance(df['P/L %'].iloc[0], str):
-                if df['P/L %'].astype(str).str.contains('%').any():
-                    stripped_values = df['P/L %'].astype(str).str.rstrip('%')
-                    df['P/L %'] = pd.to_numeric(stripped_values, errors='coerce')
-                else:
-                    df['P/L %'] = pd.to_numeric(df['P/L %'], errors='coerce')
+            df['P/L %'] = pd.to_numeric(df['P/L %'], errors='coerce')
+            if pd.api.types.is_numeric_dtype(df['P/L %']):
+                df['P/L %'] = df['P/L %'] * 100.0
+            else:
+                st.warning("P/L % column could not be fully converted to a numeric type for scaling.")
 
         numeric_cols = [
             'Current Value', 'Percent Change', 'Quantity',
@@ -82,11 +80,15 @@ def load_live_data_from_gsheet():
             except Exception:
                 pass
 
-
         if 'P/L %' in df.columns and pd.api.types.is_numeric_dtype(df['P/L %']):
             df['P/L % Visual'] = df['P/L %'].apply(format_pl_with_arrow_for_dataframe)
         else:
             df['P/L % Visual'] = "N/A"
+            # Add a debug message if P/L % wasn't suitable for visual formatting
+            if 'P/L %' not in df.columns:
+                st.warning("P/L % column missing, cannot create P/L % Visual.")
+            elif not pd.api.types.is_numeric_dtype(df['P/L %']):
+                st.warning(f"P/L % column is not numeric (type: {df['P/L %'].dtype}), P/L % Visual set to N/A.")
 
         return df
 
