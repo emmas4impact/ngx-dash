@@ -57,21 +57,7 @@ if not live_df.empty:
 
     display_df = live_df.copy()
 
-    if "P/L %" in display_df.columns:
-        def color_pl(val):
-            try:
-                val_float = float(val)
-                if val_float > 0:
-                    return f"<span style='color: green; font-weight:600;'>{val_float:.2f}%</span>"
-                elif val_float < 0:
-                    return f"<span style='color: red; font-weight:600;'>{val_float:.2f}%</span>"
-                else:
-                    return f"<span style='color: gray;'>{val_float:.2f}%</span>"
-            except:
-                return val
 
-
-        display_df["P/L % Visual"] = display_df["P/L %"].apply(color_pl)
 
     cols_to_display_updated = []
     for col in COLS_TO_DISPLAY:  # COLS_TO_DISPLAY is from config.py
