@@ -65,18 +65,13 @@ if not live_df.empty:
     display_df = live_df.copy()
 
     if "Last Updated" in display_df.columns:
-        s = display_df["Last Updated"].astype(str).str.strip()
+        # s = display_df["Last Updated"].astype(str).str.strip()
 
-        looks_like_epoch = s.str.startswith("1970-01-01").mean() > 0.8
-
-        if looks_like_epoch:
-            # Try to recover from the underlying serial number stored in the sheet
-            # by re-reading from the original column as numeric if possible.
-            raw = pd.to_numeric(live_df["Last Updated"], errors="coerce")
-
-            # If raw is small (e.g., ~46006), it is likely a Google Sheets day-serial
-            # Convert: days since 1899-12-30
-            display_df["Last Updated"] = pd.to_datetime("1899-12-30") + pd.to_timedelta(raw, unit="D")
+        display_df["Last Updated"] = pd.to_datetime(
+            display_df["Last Updated"].astype(str).str.strip(),
+            format="%Y-%m-%d %H:%M:%S",
+            errors="coerce"
+        )
         # s = display_df["Last Updated"]
         #
         # # Case A: numeric timestamp (seconds or milliseconds)
