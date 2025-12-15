@@ -58,11 +58,35 @@ if not live_df.empty:
     display_df = live_df.copy()
 
 
+    # Create arrow + % display column (no HTML, no emoji)
+    def pl_visual(val):
+        try:
+            v = float(val)
+        except (TypeError, ValueError):
+            return ""
 
+        if v > 0:
+            return f"▲ {v:.2f}%"
+        elif v < 0:
+            return f"▼ {abs(v):.2f}%"
+        else:
+            return "0.00%"
+
+
+    if "P/L %" in display_df.columns:
+        display_df["P/L % Visual"] = display_df["P/L %"].apply(pl_visual)
+
+    # cols_to_display_updated = []
+    # for col in COLS_TO_DISPLAY:  # COLS_TO_DISPLAY is from config.py
+    #     if col == 'P/L %' and 'P/L %' in display_df.columns:
+    #         cols_to_display_updated.append('P/L %')
+    #     elif col in display_df.columns:
+    #         cols_to_display_updated.append(col)
+    # final_cols_to_display = cols_to_display_updated
     cols_to_display_updated = []
-    for col in COLS_TO_DISPLAY:  # COLS_TO_DISPLAY is from config.py
-        if col == 'P/L %' and 'P/L % Visual' in display_df.columns:
-            cols_to_display_updated.append('P/L % Visual')
+    for col in COLS_TO_DISPLAY:
+        if col == "P/L %" and "P/L % Visual" in display_df.columns:
+            cols_to_display_updated.append("P/L % Visual")
         elif col in display_df.columns:
             cols_to_display_updated.append(col)
     final_cols_to_display = cols_to_display_updated
@@ -73,7 +97,7 @@ if not live_df.empty:
         "Avg. Purchase Price": st.column_config.NumberColumn(format=f"{CURRENCY_SYMBOL}%.2f"),
         "Total Cost": st.column_config.NumberColumn(format=f"{CURRENCY_SYMBOL}%.2f"),
         "Profit/Loss": st.column_config.NumberColumn(format=f"{CURRENCY_SYMBOL}%.2f"),
-        "P/L %": st.column_config.NumberColumn(format="%.2f%%"),
+        "P/L %":  st.column_config.TextColumn(label="P/L %"),
         "Percent Change": st.column_config.NumberColumn(format="%.2f"),
         "Quantity": st.column_config.NumberColumn(format="%d"),  # Integer format
         "Last Updated": st.column_config.DatetimeColumn(format="YYYY-MM-DD HH:mm:ss")
@@ -95,12 +119,29 @@ if not live_df.empty:
             return "color: gray;"
 
 
-    df_to_show = display_df[final_cols_to_display].copy()
+    def pl_visual_style(val):
+        if isinstance(val, str):
+            if val.startswith("▲"):
+                return "color: green; font-weight: 600;"
+            if val.startswith("▼"):
+                return "color: red; font-weight: 600;"
+        return "color: gray;"
 
-    cols_to_color = [c for c in ["Profit/Loss", "P/L %"] if c in df_to_show.columns]
+
+    df_to_show = display_df[final_cols_to_display].copy()
     styled_df = df_to_show.style
-    if cols_to_color:
-        styled_df = styled_df.map(pl_style, subset=cols_to_color)
+
+    if "Profit/Loss" in df_to_show.columns:
+        styled_df = styled_df.map(pl_style, subset=["Profit/Loss"])
+
+    # Color P/L % Visual (text with arrows)
+    if "P/L % Visual" in df_to_show.columns:
+        styled_df = styled_df.map(pl_visual_style, subset=["P/L % Visual"])
+
+    # cols_to_color = [c for c in ["Profit/Loss", "P/L %"] if c in df_to_show.columns]
+    # styled_df = df_to_show.style
+    # if cols_to_color:
+    #     styled_df = styled_df.map(pl_style, subset=cols_to_color)
 
     st.dataframe(
         styled_df,
@@ -108,30 +149,7 @@ if not live_df.empty:
         hide_index=True,
         column_config=active_column_config
     )
-    # df_to_show = display_df[final_cols_to_display]
-    #
-    # pl_columns_to_color = [
-    #     col for col in ["Profit/Loss", "P/L %", "P/L % Visual"]
-    #     if col in df_to_show.columns
-    # ]
-    #
-    # styled_df = df_to_show.style
-    # if pl_columns_to_color:
-    #     styled_df = styled_df.map(pl_style, subset=pl_columns_to_color)
-    #
-    # st.dataframe(
-    #     styled_df,
-    #     width="stretch",
-    #     hide_index=True,
-    #     column_config=active_column_config
-    # )
 
-    # st.dataframe(
-    #     display_df[final_cols_to_display],
-    #     use_container_width=True,
-    #     hide_index=True,
-    #     column_config=active_column_config
-    # )
     col_val, col_invested, col_pl = st.columns(3)
     with col_val:  # Total Portfolio Value
         if 'Total Value' in display_df.columns and display_df['Total Value'].notna().any():
@@ -177,7 +195,9 @@ if not live_df.empty:
 
                     if fig:
                         fig.update_layout(xaxis_title="Date", yaxis_title=f"Price ({CURRENCY_SYMBOL})")
-                        st.plotly_chart(fig, use_container_width=True)
+                        # st.plotly_chart(fig, use_container_width=True)
+                        st.plotly_chart(fig, width="stretch")
+
 
             else:
                 st.error(f"NGX chart ID not found for {selected_symbol} in `config.py`.")
