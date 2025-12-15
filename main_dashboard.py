@@ -43,15 +43,11 @@ else:
 
 st.markdown("---")
 
-
-
 # st.sidebar.header("Stock ID Mapping for Charts")
 # st.sidebar.info("Ensure `STOCK_ID_MAPPING` in `config file` is correct.")
 # st.sidebar.json(STOCK_ID_MAPPING, expanded=False)
 
 live_df = load_live_data_from_gsheet()
-
-
 
 
 if not live_df.empty:
@@ -60,14 +56,10 @@ if not live_df.empty:
     display_df = live_df.copy()
 
     if "Last Updated" in display_df.columns:
-        # s = display_df["Last Updated"].astype(str).str.strip()
-
         s = display_df["Last Updated"]
 
-        # make sure it's clean text
         s = s.astype(str).str.replace("\u00a0", " ", regex=False).str.strip()
 
-        # turn common non values into empty
         s = s.replace({"None": "", "nan": "", "NaT": ""})
 
         # parse flexibly
@@ -91,12 +83,12 @@ if not live_df.empty:
 
 
     if "P/L %" in display_df.columns:
-        display_df["P/L % Visual"] = display_df["P/L %"].apply(pl_visual)
+        display_df["P/L %"] = display_df["P/L %"].apply(pl_visual)
 
     cols_to_display_updated = []
     for col in COLS_TO_DISPLAY:
-        if col == "P/L %" and "P/L % Visual" in display_df.columns:
-            cols_to_display_updated.append("P/L % Visual")
+        if col == "P/L %" and "P/L %" in display_df.columns:
+            cols_to_display_updated.append("P/L %")
         elif col in display_df.columns:
             cols_to_display_updated.append(col)
     final_cols_to_display = cols_to_display_updated
@@ -145,8 +137,8 @@ if not live_df.empty:
         styled_df = styled_df.map(pl_style, subset=["Profit/Loss"])
 
     # Color P/L % Visual (text with arrows)
-    if "P/L % Visual" in df_to_show.columns:
-        styled_df = styled_df.map(pl_visual_style, subset=["P/L % Visual"])
+    if "P/L %" in df_to_show.columns:
+        styled_df = styled_df.map(pl_visual_style, subset=["P/L %"])
 
     # cols_to_color = [c for c in ["Profit/Loss", "P/L %"] if c in df_to_show.columns]
     # styled_df = df_to_show.style
@@ -205,7 +197,6 @@ if not live_df.empty:
 
                     if fig:
                         fig.update_layout(xaxis_title="Date", yaxis_title=f"Price ({CURRENCY_SYMBOL})")
-                        # st.plotly_chart(fig, use_container_width=True)
                         st.plotly_chart(fig, width="stretch")
 
 
