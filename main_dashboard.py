@@ -50,6 +50,14 @@ st.markdown("---")
 # st.sidebar.json(STOCK_ID_MAPPING, expanded=False)
 
 live_df = load_live_data_from_gsheet()
+st.sidebar.markdown("### Debug: Last Updated")
+if "Last Updated" in live_df.columns:
+    st.sidebar.write("dtype:", live_df["Last Updated"].dtype)
+    st.sidebar.write("sample values:")
+    st.sidebar.write(live_df["Last Updated"].head(10).tolist())
+else:
+    st.sidebar.write("Column 'Last Updated' not found in live_df")
+
 
 if not live_df.empty:
     st.header("My Portfolio Snapshot")
