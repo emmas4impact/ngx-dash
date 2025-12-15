@@ -87,12 +87,7 @@ if not live_df.empty:
         "Avg. Purchase Price": st.column_config.NumberColumn(format=f"{CURRENCY_SYMBOL}%.2f"),
         "Total Cost": st.column_config.NumberColumn(format=f"{CURRENCY_SYMBOL}%.2f"),
         "Profit/Loss": st.column_config.NumberColumn(format=f"{CURRENCY_SYMBOL}%.2f"),
-        "P/L % Visual": st.column_config.TextColumn(label="P/L %"),
-        # "P/L % Visual": st.column_config.TextColumn(label="P/L %",
-        # help="Profit/Loss Percentage",
-        # width="small",
-        # unsafe_allow_html=True),
-        # Display string, label header as "P/L %"
+        "P/L %": st.column_config.NumberColumn(format="%.2f%%"),
         "Percent Change": st.column_config.NumberColumn(format="%.2f"),
         "Quantity": st.column_config.NumberColumn(format="%d"),  # Integer format
         "Last Updated": st.column_config.DatetimeColumn(format="YYYY-MM-DD HH:mm:ss")
@@ -100,40 +95,6 @@ if not live_df.empty:
     active_column_config = {k: v for k, v in column_config.items() if k in final_cols_to_display}
 
 
-    # def pl_style(val):
-    #     """Return CSS style for Profit/Loss values."""
-    #     try:
-    #         v = float(val)
-    #     except (TypeError, ValueError):
-    #         return ""
-    #
-    #     if v > 0:
-    #         return "color: green; font-weight: 600;"
-    #     elif v < 0:
-    #         return "color: red; font-weight: 600;"
-    #     else:
-    #         return "color: gray;"
-    #
-    # # Build the base DataFrame to show
-    # df_to_show = display_df[final_cols_to_display]
-    #
-    # # Decide which columns to color (whichever exist)
-    # pl_columns_to_color = [
-    #     col for col in ["Profit/Loss", "P/L %", "P/L % Visual"]
-    #     if col in df_to_show.columns
-    # ]
-    #
-    # if pl_columns_to_color:
-    #     styled_df = df_to_show.style.applymap(pl_style, subset=pl_columns_to_color)
-    # else:
-    #     styled_df = df_to_show.style
-    #
-    # st.dataframe(
-    #     styled_df,
-    #     use_container_width=True,
-    #     hide_index=True,
-    #     column_config=active_column_config
-    # )
     def pl_style(val):
         try:
             v = float(val)
@@ -148,16 +109,12 @@ if not live_df.empty:
             return "color: gray;"
 
 
-    df_to_show = display_df[final_cols_to_display]
+    df_to_show = display_df[final_cols_to_display].copy()
 
-    pl_columns_to_color = [
-        col for col in ["Profit/Loss", "P/L %", "P/L % Visual"]
-        if col in df_to_show.columns
-    ]
-
+    cols_to_color = [c for c in ["Profit/Loss", "P/L %"] if c in df_to_show.columns]
     styled_df = df_to_show.style
-    if pl_columns_to_color:
-        styled_df = styled_df.map(pl_style, subset=pl_columns_to_color)
+    if cols_to_color:
+        styled_df = styled_df.map(pl_style, subset=cols_to_color)
 
     st.dataframe(
         styled_df,
@@ -165,6 +122,23 @@ if not live_df.empty:
         hide_index=True,
         column_config=active_column_config
     )
+    # df_to_show = display_df[final_cols_to_display]
+    #
+    # pl_columns_to_color = [
+    #     col for col in ["Profit/Loss", "P/L %", "P/L % Visual"]
+    #     if col in df_to_show.columns
+    # ]
+    #
+    # styled_df = df_to_show.style
+    # if pl_columns_to_color:
+    #     styled_df = styled_df.map(pl_style, subset=pl_columns_to_color)
+    #
+    # st.dataframe(
+    #     styled_df,
+    #     width="stretch",
+    #     hide_index=True,
+    #     column_config=active_column_config
+    # )
 
     # st.dataframe(
     #     display_df[final_cols_to_display],
