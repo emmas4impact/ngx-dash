@@ -100,8 +100,41 @@ if not live_df.empty:
     active_column_config = {k: v for k, v in column_config.items() if k in final_cols_to_display}
 
 
+    # def pl_style(val):
+    #     """Return CSS style for Profit/Loss values."""
+    #     try:
+    #         v = float(val)
+    #     except (TypeError, ValueError):
+    #         return ""
+    #
+    #     if v > 0:
+    #         return "color: green; font-weight: 600;"
+    #     elif v < 0:
+    #         return "color: red; font-weight: 600;"
+    #     else:
+    #         return "color: gray;"
+    #
+    # # Build the base DataFrame to show
+    # df_to_show = display_df[final_cols_to_display]
+    #
+    # # Decide which columns to color (whichever exist)
+    # pl_columns_to_color = [
+    #     col for col in ["Profit/Loss", "P/L %", "P/L % Visual"]
+    #     if col in df_to_show.columns
+    # ]
+    #
+    # if pl_columns_to_color:
+    #     styled_df = df_to_show.style.applymap(pl_style, subset=pl_columns_to_color)
+    # else:
+    #     styled_df = df_to_show.style
+    #
+    # st.dataframe(
+    #     styled_df,
+    #     use_container_width=True,
+    #     hide_index=True,
+    #     column_config=active_column_config
+    # )
     def pl_style(val):
-        """Return CSS style for Profit/Loss values."""
         try:
             v = float(val)
         except (TypeError, ValueError):
@@ -114,23 +147,21 @@ if not live_df.empty:
         else:
             return "color: gray;"
 
-    # Build the base DataFrame to show
+
     df_to_show = display_df[final_cols_to_display]
 
-    # Decide which columns to color (whichever exist)
     pl_columns_to_color = [
         col for col in ["Profit/Loss", "P/L %", "P/L % Visual"]
         if col in df_to_show.columns
     ]
 
+    styled_df = df_to_show.style
     if pl_columns_to_color:
-        styled_df = df_to_show.style.applymap(pl_style, subset=pl_columns_to_color)
-    else:
-        styled_df = df_to_show.style
+        styled_df = styled_df.map(pl_style, subset=pl_columns_to_color)
 
     st.dataframe(
         styled_df,
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
         column_config=active_column_config
     )
