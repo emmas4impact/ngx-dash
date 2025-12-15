@@ -1,6 +1,7 @@
 
 import streamlit as st
 import plotly.express as px
+import pandas as pd
 from streamlit_autorefresh import st_autorefresh
 from datetime import datetime # <<< Ensure datetime is imported
 import pytz
@@ -55,8 +56,21 @@ if not live_df.empty:
 
     display_df = live_df.copy()
 
+    if "Last Updated" in display_df.columns:
+        s = display_df["Last Updated"]
 
-    # Create arrow + % display column (no HTML, no emoji)
+        # Case A: numeric timestamp (seconds or milliseconds)
+        if pd.api.types.is_numeric_dtype(s):
+            # Detect ms vs s by magnitude
+            unit = "ms" if s.dropna().astype(float).gt(10_000_000_000).any() else "s"
+            display_df["Last Updated"] = pd.to_datetime(s, unit=unit, errors="coerce", utc=True).dt.tz_convert(None)
+
+        else:
+            # Case B: string datetime (or mixed)
+            display_df["Last Updated"] = pd.to_datetime(s, errors="coerce", utc=True).dt.tz_convert(None)
+
+
+
     def pl_visual(val):
         try:
             v = float(val)
