@@ -50,13 +50,13 @@ st.markdown("---")
 # st.sidebar.json(STOCK_ID_MAPPING, expanded=False)
 
 live_df = load_live_data_from_gsheet()
-st.sidebar.markdown("### Debug: Last Updated")
+st.sidebar.markdown("### Debug: Last Updated (raw)")
 if "Last Updated" in live_df.columns:
     st.sidebar.write("dtype:", live_df["Last Updated"].dtype)
-    st.sidebar.write("sample values:")
-    st.sidebar.write(live_df["Last Updated"].head(10).tolist())
+    st.sidebar.write([repr(x) for x in live_df["Last Updated"].head(10).tolist()])
 else:
-    st.sidebar.write("Column 'Last Updated' not found in live_df")
+    st.sidebar.write("Column 'Last Updated' not found")
+
 
 
 if not live_df.empty:
@@ -67,11 +67,16 @@ if not live_df.empty:
     if "Last Updated" in display_df.columns:
         # s = display_df["Last Updated"].astype(str).str.strip()
 
-        display_df["Last Updated"] = pd.to_datetime(
-            display_df["Last Updated"].astype(str).str.strip(),
-            format="%Y-%m-%d %H:%M:%S",
-            errors="coerce"
-        )
+        s = display_df["Last Updated"]
+
+        # make sure it's clean text
+        s = s.astype(str).str.replace("\u00a0", " ", regex=False).str.strip()
+
+        # turn common non values into empty
+        s = s.replace({"None": "", "nan": "", "NaT": ""})
+
+        # parse flexibly
+        display_df["Last Updated"] = pd.to_datetime(s, errors="coerce")
         # s = display_df["Last Updated"]
         #
         # # Case A: numeric timestamp (seconds or milliseconds)
