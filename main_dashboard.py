@@ -50,12 +50,7 @@ st.markdown("---")
 # st.sidebar.json(STOCK_ID_MAPPING, expanded=False)
 
 live_df = load_live_data_from_gsheet()
-st.sidebar.markdown("### Debug: Last Updated (raw)")
-if "Last Updated" in live_df.columns:
-    st.sidebar.write("dtype:", live_df["Last Updated"].dtype)
-    st.sidebar.write([repr(x) for x in live_df["Last Updated"].head(10).tolist()])
-else:
-    st.sidebar.write("Column 'Last Updated' not found")
+
 
 
 
@@ -77,17 +72,7 @@ if not live_df.empty:
 
         # parse flexibly
         display_df["Last Updated"] = pd.to_datetime(s, errors="coerce")
-        # s = display_df["Last Updated"]
-        #
-        # # Case A: numeric timestamp (seconds or milliseconds)
-        # if pd.api.types.is_numeric_dtype(s):
-        #     # Detect ms vs s by magnitude
-        #     unit = "ms" if s.dropna().astype(float).gt(10_000_000_000).any() else "s"
-        #     display_df["Last Updated"] = pd.to_datetime(s, unit=unit, errors="coerce", utc=True).dt.tz_convert(None)
 
-    # else:
-    #         # Case B: string datetime (or mixed)
-    #         display_df["Last Updated"] = pd.to_datetime(s, errors="coerce", utc=True).dt.tz_convert(None)
 
 
 
