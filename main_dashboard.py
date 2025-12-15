@@ -57,17 +57,23 @@ if not live_df.empty:
     display_df = live_df.copy()
 
     if "Last Updated" in display_df.columns:
-        s = display_df["Last Updated"]
+        s = display_df["Last Updated"].astype(str).str.strip()
 
-        # Case A: numeric timestamp (seconds or milliseconds)
-        if pd.api.types.is_numeric_dtype(s):
-            # Detect ms vs s by magnitude
-            unit = "ms" if s.dropna().astype(float).gt(10_000_000_000).any() else "s"
-            display_df["Last Updated"] = pd.to_datetime(s, unit=unit, errors="coerce", utc=True).dt.tz_convert(None)
+        dt1 = pd.to_datetime(s, format="%m/%d/%Y %H:%M:%S", errors="coerce")
+        dt2 = pd.to_datetime(s, format="%m/%d/%Y", errors="coerce")
 
-        else:
-            # Case B: string datetime (or mixed)
-            display_df["Last Updated"] = pd.to_datetime(s, errors="coerce", utc=True).dt.tz_convert(None)
+        display_df["Last Updated"] = dt1.fillna(dt2)
+        # s = display_df["Last Updated"]
+        #
+        # # Case A: numeric timestamp (seconds or milliseconds)
+        # if pd.api.types.is_numeric_dtype(s):
+        #     # Detect ms vs s by magnitude
+        #     unit = "ms" if s.dropna().astype(float).gt(10_000_000_000).any() else "s"
+        #     display_df["Last Updated"] = pd.to_datetime(s, unit=unit, errors="coerce", utc=True).dt.tz_convert(None)
+
+    # else:
+    #         # Case B: string datetime (or mixed)
+    #         display_df["Last Updated"] = pd.to_datetime(s, errors="coerce", utc=True).dt.tz_convert(None)
 
 
 
