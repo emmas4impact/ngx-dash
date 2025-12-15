@@ -57,6 +57,22 @@ if not live_df.empty:
 
     display_df = live_df.copy()
 
+    if "P/L %" in display_df.columns:
+        def color_pl(val):
+            try:
+                val_float = float(val)
+                if val_float > 0:
+                    return f"<span style='color: green; font-weight:600;'>{val_float:.2f}%</span>"
+                elif val_float < 0:
+                    return f"<span style='color: red; font-weight:600;'>{val_float:.2f}%</span>"
+                else:
+                    return f"<span style='color: gray;'>{val_float:.2f}%</span>"
+            except:
+                return val
+
+
+        display_df["P/L % Visual"] = display_df["P/L %"].apply(color_pl)
+
     cols_to_display_updated = []
     for col in COLS_TO_DISPLAY:  # COLS_TO_DISPLAY is from config.py
         if col == 'P/L %' and 'P/L % Visual' in display_df.columns:
@@ -71,7 +87,12 @@ if not live_df.empty:
         "Avg. Purchase Price": st.column_config.NumberColumn(format=f"{CURRENCY_SYMBOL}%.2f"),
         "Total Cost": st.column_config.NumberColumn(format=f"{CURRENCY_SYMBOL}%.2f"),
         "Profit/Loss": st.column_config.NumberColumn(format=f"{CURRENCY_SYMBOL}%.2f"),
-        "P/L % Visual": st.column_config.TextColumn(label="P/L %"),  # Display string, label header as "P/L %"
+        # "P/L % Visual": st.column_config.TextColumn(label="P/L %"),
+        "P/L % Visual": st.column_config.TextColumn(label="P/L %",
+        help="Profit/Loss Percentage",
+        width="small",
+        unsafe_allow_html=True),
+        # Display string, label header as "P/L %"
         "Percent Change": st.column_config.NumberColumn(format="%.2f"),
         "Quantity": st.column_config.NumberColumn(format="%d"),  # Integer format
         "Last Updated": st.column_config.DatetimeColumn(format="YYYY-MM-DD HH:mm:ss")
