@@ -42,7 +42,9 @@ def load_live_data_from_gsheet():
         client = gspread.authorize(creds)
         spreadsheet = client.open(SPREADSHEET_NAME)
         worksheet = spreadsheet.worksheet(WORKSHEET_NAME)
-        data = worksheet.get_all_records(value_render_option='UNFORMATTED_VALUE')
+        data = worksheet.get_all_records(value_render_option='FORMATTED_VALUE')
+
+        # data = worksheet.get_all_records(value_render_option='UNFORMATTED_VALUE')
 
         if not data:
             st.warning(f"No data from worksheet '{WORKSHEET_NAME}'. Check Apps Script.")
