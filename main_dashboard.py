@@ -42,13 +42,11 @@ else:
 
 st.markdown("---")
 
-# if check_auto_refresh_conditions(market_status):
-#     st_autorefresh(interval=REFRESH_INTERVAL_SECONDS * 1000, key="dashboard_autorefresh")
-# st.markdown("---")
 
-st.sidebar.header("Stock ID Mapping for Charts")
-st.sidebar.info("Ensure `STOCK_ID_MAPPING` in `config file` is correct.")
-st.sidebar.json(STOCK_ID_MAPPING, expanded=False)
+
+# st.sidebar.header("Stock ID Mapping for Charts")
+# st.sidebar.info("Ensure `STOCK_ID_MAPPING` in `config file` is correct.")
+# st.sidebar.json(STOCK_ID_MAPPING, expanded=False)
 
 live_df = load_live_data_from_gsheet()
 
@@ -76,13 +74,6 @@ if not live_df.empty:
     if "P/L %" in display_df.columns:
         display_df["P/L % Visual"] = display_df["P/L %"].apply(pl_visual)
 
-    # cols_to_display_updated = []
-    # for col in COLS_TO_DISPLAY:  # COLS_TO_DISPLAY is from config.py
-    #     if col == 'P/L %' and 'P/L %' in display_df.columns:
-    #         cols_to_display_updated.append('P/L %')
-    #     elif col in display_df.columns:
-    #         cols_to_display_updated.append(col)
-    # final_cols_to_display = cols_to_display_updated
     cols_to_display_updated = []
     for col in COLS_TO_DISPLAY:
         if col == "P/L %" and "P/L % Visual" in display_df.columns:
