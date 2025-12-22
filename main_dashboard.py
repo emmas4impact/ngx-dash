@@ -163,11 +163,19 @@ if not live_df.empty:
             st.metric(label=f"Total Profit/Loss ({CURRENCY_SYMBOL})", value="", delta=f"{total_profit_loss_val:,.2f}")
     st.markdown("---")
 
-
     st.header("Historical Price Chart")
 
-    # Chart type selection
     chart_type = st.selectbox("Select Chart Type:", ["Line Chart", "Bar Chart"])
+
+    # Time range selection
+    range_label = st.selectbox("Select Time Range:", ["3 Months", "6 Months", "1 Year", "All"])
+
+    range_to_months = {
+        "3 Months": 3,
+        "6 Months": 6,
+        "1 Year": 12,
+        "All": None,
+    }
 
     if 'Symbol' in live_df.columns:
         available_symbols_for_chart = sorted([s for s in live_df['Symbol'].unique() if s in STOCK_ID_MAPPING])
@@ -182,22 +190,68 @@ if not live_df.empty:
             ngx_specific_id = STOCK_ID_MAPPING.get(selected_symbol)
             if ngx_specific_id:
                 historical_df = fetch_historical_data(ngx_specific_id)
-                if not historical_df.empty:
-                    fig = None
-                    if chart_type == "Line Chart":
-                        fig = px.line(historical_df, x='Date', y='Price',
-                                      title=f"{selected_symbol} Historical Price (Line)")
-                    elif chart_type == "Bar Chart":
-                        fig = px.bar(historical_df, x='Date', y='Price',
-                                     title=f"{selected_symbol} Historical Price (Bar)")
 
-                    if fig:
+                if not historical_df.empty:
+                    # Ensure Date is datetime
+                    historical_df["Date"] = pd.to_datetime(historical_df["Date"], errors="coerce")
+                    historical_df = historical_df.dropna(subset=["Date"]).sort_values("Date")
+
+                    months = range_to_months[range_label]
+                    if months is not None:
+                        cutoff = pd.Timestamp.now() - pd.DateOffset(months=months)
+                        filtered_df = historical_df[historical_df["Date"] >= cutoff]
+                    else:
+                        filtered_df = historical_df
+
+                    if filtered_df.empty:
+                        st.warning(f"No data available for {selected_symbol} in the last {range_label.lower()}.")
+                    else:
+                        if chart_type == "Line Chart":
+                            fig = px.line(filtered_df, x="Date", y="Price",
+                                          title=f"{selected_symbol} Historical Price ({range_label})")
+                        else:
+                            fig = px.bar(filtered_df, x="Date", y="Price",
+                                         title=f"{selected_symbol} Historical Price ({range_label})")
+
                         fig.update_layout(xaxis_title="Date", yaxis_title=f"Price ({CURRENCY_SYMBOL})")
                         st.plotly_chart(fig, width="stretch")
-
-
             else:
                 st.error(f"NGX chart ID not found for {selected_symbol} in `config.py`.")
+
+    # st.header("Historical Price Chart")
+    #
+    # # Chart type selection
+    # chart_type = st.selectbox("Select Chart Type:", ["Line Chart", "Bar Chart"])
+    #
+    # if 'Symbol' in live_df.columns:
+    #     available_symbols_for_chart = sorted([s for s in live_df['Symbol'].unique() if s in STOCK_ID_MAPPING])
+    # else:
+    #     available_symbols_for_chart = []
+    #
+    # if not available_symbols_for_chart:
+    #     st.warning("No stocks for charting. Check `STOCK_ID_MAPPING` in `config.py` & sheet symbols.")
+    # else:
+    #     selected_symbol = st.selectbox("Select Stock for Historical Chart:", options=available_symbols_for_chart)
+    #     if selected_symbol:
+    #         ngx_specific_id = STOCK_ID_MAPPING.get(selected_symbol)
+    #         if ngx_specific_id:
+    #             historical_df = fetch_historical_data(ngx_specific_id)
+    #             if not historical_df.empty:
+    #                 fig = None
+    #                 if chart_type == "Line Chart":
+    #                     fig = px.line(historical_df, x='Date', y='Price',
+    #                                   title=f"{selected_symbol} Historical Price (Line)")
+    #                 elif chart_type == "Bar Chart":
+    #                     fig = px.bar(historical_df, x='Date', y='Price',
+    #                                  title=f"{selected_symbol} Historical Price (Bar)")
+    #
+    #                 if fig:
+    #                     fig.update_layout(xaxis_title="Date", yaxis_title=f"Price ({CURRENCY_SYMBOL})")
+    #                     st.plotly_chart(fig, width="stretch")
+    #
+    #
+    #         else:
+    #             st.error(f"NGX chart ID not found for {selected_symbol} in `config.py`.")
 else:
     st.warning("Could not load live data. Check Google Sheet connection and Apps Script.")
 
