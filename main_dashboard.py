@@ -213,8 +213,17 @@ if not live_df.empty:
                             fig = px.bar(filtered_df, x="Date", y="Price",
                                          title=f"{selected_symbol} Historical Price ({range_label})")
 
-                        fig.update_layout(xaxis_title="Date", yaxis_title=f"Price ({CURRENCY_SYMBOL})")
-                        st.plotly_chart(fig, width="stretch")
+                        # fig.update_layout(xaxis_title="Date", yaxis_title=f"Price ({CURRENCY_SYMBOL})")
+                        # st.plotly_chart(fig, width="stretch")
+                        fig.update_layout(
+                            xaxis_title="Date",
+                            yaxis_title=f"Price ({CURRENCY_SYMBOL})",
+                            xaxis=dict(range=[filtered_df["Date"].min(), filtered_df["Date"].max()])
+                        )
+
+                        # Key forces Streamlit to re-mount the chart when range changes
+                        st.plotly_chart(fig, width="stretch", key=f"hist_{selected_symbol}_{range_label}_{chart_type}")
+
             else:
                 st.error(f"NGX chart ID not found for {selected_symbol} in `config.py`.")
 
