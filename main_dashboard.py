@@ -177,55 +177,79 @@ if not live_df.empty:
         "All": None,
     }
 
-    if 'Symbol' in live_df.columns:
-        available_symbols_for_chart = sorted([s for s in live_df['Symbol'].unique() if s in STOCK_ID_MAPPING])
+    if "Symbol" in live_df.columns:
+        available_symbols_for_chart = sorted(
+            [s for s in live_df["Symbol"].dropna().unique() if s in STOCK_ID_MAPPING]
+        )
     else:
         available_symbols_for_chart = []
 
     if not available_symbols_for_chart:
-        st.warning("No stocks for charting. Check `STOCK_ID_MAPPING` in `config.py` & sheet symbols.")
+        st.warning("No stocks for charting. Check `STOCK_ID_MAPPING` in `config.py` and sheet symbols.")
     else:
-        selected_symbol = st.selectbox("Select Stock for Historical Chart:", options=available_symbols_for_chart)
-        if selected_symbol:
-            ngx_specific_id = STOCK_ID_MAPPING.get(selected_symbol)
-            if ngx_specific_id:
-                historical_df = fetch_historical_data(ngx_specific_id)
+        selected_symbol = st.selectbox(
+            "Select Stock for Historical Chart:",
+            options=available_symbols_for_chart,
+            key="selected_symbol"
+        )
 
-                if not historical_df.empty:
-                    # Ensure Date is datetime
-                    historical_df["Date"] = pd.to_datetime(historical_df["Date"], errors="coerce")
-                    historical_df = historical_df.dropna(subset=["Date"]).sort_values("Date")
+        ngx_specific_id = STOCK_ID_MAPPING.get(selected_symbol)
+        if not ngx_specific_id:
+            st.error(f"NGX chart ID not found for {selected_symbol} in `config.py`.")
+        else:
+            historical_df = fetch_historical_data(ngx_specific_id)
 
-                    months = range_to_months[range_label]
+            if historical_df is None or historical_df.empty:
+                st.warning("No historical data returned for this stock.")
+            else:
+                # Ensure correct dtypes and order
+                historical_df = historical_df.copy()
+                historical_df["Date"] = pd.to_datetime(historical_df["Date"], errors="coerce")
+                historical_df["Price"] = pd.to_numeric(historical_df["Price"], errors="coerce")
+                historical_df = historical_df.dropna(subset=["Date", "Price"]).sort_values("Date")
+
+                if historical_df.empty:
+                    st.warning("Historical data exists but could not be parsed (Date or Price invalid).")
+                else:
+                    # Anchor the filter to the latest date in the dataset
+                    latest_date = historical_df["Date"].max()
+                    months = range_to_months.get(range_label)
+
                     if months is not None:
-                        cutoff = pd.Timestamp.now() - pd.DateOffset(months=months)
-                        filtered_df = historical_df[historical_df["Date"] >= cutoff]
+                        cutoff = latest_date - pd.DateOffset(months=months)
+                        filtered_df = historical_df.loc[historical_df["Date"] >= cutoff].copy()
                     else:
-                        filtered_df = historical_df
+                        filtered_df = historical_df.copy()
+
+                    # Helpful caption to confirm filter is actually applied
+                    st.caption(
+                        f"History span: {historical_df['Date'].min().date()} to {historical_df['Date'].max().date()} "
+                        f"| showing {len(filtered_df)} of {len(historical_df)} points"
+                    )
 
                     if filtered_df.empty:
-                        st.warning(f"No data available for {selected_symbol} in the last {range_label.lower()}.")
+                        st.warning(f"No data available for {selected_symbol} in the selected range.")
                     else:
-                        if chart_type == "Line Chart":
-                            fig = px.line(filtered_df, x="Date", y="Price",
-                                          title=f"{selected_symbol} Historical Price ({range_label})")
-                        else:
-                            fig = px.bar(filtered_df, x="Date", y="Price",
-                                         title=f"{selected_symbol} Historical Price ({range_label})")
+                        title = f"{selected_symbol} Historical Price ({range_label})"
 
-                        # fig.update_layout(xaxis_title="Date", yaxis_title=f"Price ({CURRENCY_SYMBOL})")
-                        # st.plotly_chart(fig, width="stretch")
+                        if chart_type == "Line Chart":
+                            fig = px.line(filtered_df, x="Date", y="Price", title=title)
+                        else:
+                            fig = px.bar(filtered_df, x="Date", y="Price", title=title)
+
+                        # Force x axis to the filtered range and reset zoom
                         fig.update_layout(
                             xaxis_title="Date",
                             yaxis_title=f"Price ({CURRENCY_SYMBOL})",
                             xaxis=dict(range=[filtered_df["Date"].min(), filtered_df["Date"].max()])
                         )
 
-                        # Key forces Streamlit to re-mount the chart when range changes
-                        st.plotly_chart(fig, width="stretch", key=f"hist_{selected_symbol}_{range_label}_{chart_type}")
-
-            else:
-                st.error(f"NGX chart ID not found for {selected_symbol} in `config.py`.")
+                        # Key forces Streamlit to re mount chart when inputs change
+                        st.plotly_chart(
+                            fig,
+                            width="stretch",
+                            key=f"hist_{selected_symbol}_{range_label}_{chart_type}"
+                        )
 
     # st.header("Historical Price Chart")
     #
