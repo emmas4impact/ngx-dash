@@ -51,7 +51,7 @@ live_df = load_live_data_from_gsheet()
 
 
 if not live_df.empty:
-    st.header("My Portfolio Snapshot")
+    st.header("Portfolio Snapshot")
 
     display_df = live_df.copy()
 
@@ -140,10 +140,6 @@ if not live_df.empty:
     if "P/L %" in df_to_show.columns:
         styled_df = styled_df.map(pl_visual_style, subset=["P/L %"])
 
-    # cols_to_color = [c for c in ["Profit/Loss", "P/L %"] if c in df_to_show.columns]
-    # styled_df = df_to_show.style
-    # if cols_to_color:
-    #     styled_df = styled_df.map(pl_style, subset=cols_to_color)
 
     st.dataframe(
         styled_df,
