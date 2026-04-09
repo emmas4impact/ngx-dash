@@ -43,10 +43,6 @@ else:
 
 st.markdown("---")
 
-# st.sidebar.header("Stock ID Mapping for Charts")
-# st.sidebar.info("Ensure `STOCK_ID_MAPPING` in `config file` is correct.")
-# st.sidebar.json(STOCK_ID_MAPPING, expanded=False)
-
 live_df = load_live_data_from_gsheet()
 
 

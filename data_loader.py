@@ -42,9 +42,8 @@ def load_live_data_from_gsheet():
         client = gspread.authorize(creds)
         spreadsheet = client.open(SPREADSHEET_NAME)
         worksheet = spreadsheet.worksheet(WORKSHEET_NAME)
-        data = worksheet.get_all_records(value_render_option='FORMATTED_VALUE')
-
-        # data = worksheet.get_all_records(value_render_option='UNFORMATTED_VALUE')
+        # data = worksheet.get_all_records(value_render_option='FORMATTED_VALUE')
+        data = worksheet.get_all_records(value_render_option='UNFORMATTED_VALUE')
 
         if not data:
             st.warning(f"No data from worksheet '{WORKSHEET_NAME}'. Check Apps Script.")
@@ -53,28 +52,23 @@ def load_live_data_from_gsheet():
         df = pd.DataFrame(data)
 
         if 'P/L %' in df.columns:
-            s = df['P/L %']
+            s = df['P/L %'].astype(str).str.replace('%', '', regex=False).str.replace(',', '').str.strip()
+            df['P/L %'] = pd.to_numeric(s, errors='coerce')
 
-            # Handle formatted strings like "12.34%"
-            if s.dtype == object:
-                s = s.astype(str).str.replace('%', '', regex=False).str.strip()
-
-            s = pd.to_numeric(s, errors='coerce')
-
-            # If values are fractions (e.g. 0.1234), convert to percent
-            non_na = s.dropna()
-            if len(non_na) and non_na.abs().max() <= 1:
-                s = s * 100.0
-
-            df['P/L %'] = s
-
-        # if 'P/L %' in df.columns:
-        #     df['P/L %'] = pd.to_numeric(df['P/L %'], errors='coerce')
-        #     if pd.api.types.is_numeric_dtype(df['P/L %']):
-        #         df['P/L %'] = df['P/L %'] * 100.0
-        #     else:
-        #         st.warning("P/L % column could not be fully converted to a numeric type for scaling.")
-
+            # s = df['P/L %']
+            #
+            # # Handle formatted strings like "12.34%"
+            # if s.dtype == object:
+            #     s = s.astype(str).str.replace('%', '', regex=False).str.strip()
+            #
+            # s = pd.to_numeric(s, errors='coerce')
+            #
+            # # If values are fractions (e.g. 0.1234), convert to percent
+            # non_na = s.dropna()
+            # if len(non_na) and non_na.abs().max() <= 1:
+            #     s = s * 100.0
+            #
+            # df['P/L %'] = s
         numeric_cols = [
             'Current Value', 'Percent Change', 'Quantity',
             'Avg. Purchase Price', 'Total Cost', 'Profit/Loss', 'P/L %'
