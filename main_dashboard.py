@@ -66,7 +66,7 @@ if not live_df.empty:
 
     def pl_visual(val):
         try:
-            v = float(val) * 100
+            v = float(val)
         except (TypeError, ValueError):
             return ""
 
