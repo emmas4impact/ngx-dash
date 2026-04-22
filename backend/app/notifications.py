@@ -15,6 +15,10 @@ from .models import User
 from .settings import Settings
 
 
+class EmailDeliveryError(RuntimeError):
+    pass
+
+
 def send_email(
     settings: Settings,
     *,
@@ -27,13 +31,18 @@ def send_email(
         raise RuntimeError("Email is not configured")
 
     if settings.resend_api_key:
-        send_resend_email(
-            settings,
-            to_email=to_email,
-            subject=subject,
-            body=body,
-            attachment=attachment,
-        )
+        try:
+            send_resend_email(
+                settings,
+                to_email=to_email,
+                subject=subject,
+                body=body,
+                attachment=attachment,
+            )
+        except requests.Timeout as exc:
+            raise EmailDeliveryError("Resend API timed out while sending email") from exc
+        except requests.RequestException as exc:
+            raise EmailDeliveryError(f"Resend API request failed: {exc}") from exc
         return
 
     message = EmailMessage()
@@ -47,12 +56,20 @@ def send_email(
         maintype, subtype = mime_type.split("/", 1)
         message.add_attachment(payload, maintype=maintype, subtype=subtype, filename=filename)
 
-    with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=20) as smtp:
-        if settings.smtp_use_tls:
-            smtp.starttls()
-        if settings.smtp_username and settings.smtp_password:
-            smtp.login(settings.smtp_username, settings.smtp_password)
-        smtp.send_message(message)
+    try:
+        with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=20) as smtp:
+            if settings.smtp_use_tls:
+                smtp.starttls()
+            if settings.smtp_username and settings.smtp_password:
+                smtp.login(settings.smtp_username, settings.smtp_password)
+            smtp.send_message(message)
+    except TimeoutError as exc:
+        raise EmailDeliveryError(
+            "SMTP timed out while sending email. If you are using Resend, set RESEND_API_KEY and RESEND_FROM_EMAIL "
+            "on the Railway backend service so the app uses Resend HTTPS API instead of SMTP."
+        ) from exc
+    except OSError as exc:
+        raise EmailDeliveryError(f"SMTP delivery failed: {exc}") from exc
 
 
 def send_resend_email(

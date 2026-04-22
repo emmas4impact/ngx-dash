@@ -253,6 +253,7 @@ def request_email_verification(
         )
 
     try:
+        logger.info("Sending email verification via %s", settings.email_provider)
         send_email(
             settings,
             to_email=user.email,
@@ -265,7 +266,7 @@ def request_email_verification(
             ),
         )
     except Exception as exc:
-        logger.warning("Email verification delivery failed: %s", exc)
+        logger.warning("Email verification delivery failed via %s: %s", settings.email_provider, exc)
         return MessageResponse(message=f"Could not send verification email yet: {exc}")
 
     return MessageResponse(message="Verification email sent.")
@@ -289,6 +290,7 @@ def email_portfolio_report(
         return MessageResponse(message="Portfolio report generated, but email is not configured on the server.")
 
     try:
+        logger.info("Sending portfolio report via %s", settings.email_provider)
         send_email(
             settings,
             to_email=user.email,
@@ -300,7 +302,7 @@ def email_portfolio_report(
             attachment=("ngx-portfolio-report.pdf", pdf, "application/pdf"),
         )
     except Exception as exc:
-        logger.warning("Portfolio report email delivery failed: %s", exc)
+        logger.warning("Portfolio report email delivery failed via %s: %s", settings.email_provider, exc)
         return MessageResponse(message=f"Could not email portfolio report yet: {exc}")
 
     return MessageResponse(message=f"Portfolio report emailed to {user.email}.")
@@ -380,6 +382,19 @@ def get_sync_logs(
     _: User = Depends(get_current_superuser),
 ):
     return sync_logs_query(db, limit)
+
+
+@app.get("/admin/email/status")
+def get_email_status(_: User = Depends(get_current_superuser)) -> dict:
+    return {
+        "enabled": settings.email_enabled,
+        "provider": settings.email_provider,
+        "has_resend_api_key": bool(settings.resend_api_key),
+        "has_resend_from_email": bool(settings.resend_from_email),
+        "has_smtp_host": bool(settings.smtp_host),
+        "has_smtp_from_email": bool(settings.smtp_from_email),
+        "from_email": settings.from_email,
+    }
 
 
 @app.get("/portfolio/holdings", response_model=list[HoldingOut])

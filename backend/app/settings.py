@@ -70,6 +70,14 @@ class Settings(BaseSettings):
     def from_email(self) -> str | None:
         return self.resend_from_email or self.smtp_from_email or self.smtp_username
 
+    @property
+    def email_provider(self) -> str:
+        if self.resend_api_key:
+            return "resend"
+        if self.smtp_host:
+            return "smtp"
+        return "none"
+
 
 @lru_cache
 def get_settings() -> Settings:

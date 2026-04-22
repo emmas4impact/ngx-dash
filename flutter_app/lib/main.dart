@@ -999,14 +999,6 @@ class _DashboardShellState extends State<DashboardShell> {
                                 setState(() => index = value),
                             labelType: NavigationRailLabelType.all,
                             destinations: railDestinations,
-                            trailing: Expanded(
-                              child: Align(
-                                alignment: Alignment.bottomCenter,
-                                child: VersionLabel(
-                                  packageInfoFuture: packageInfoFuture,
-                                ),
-                              ),
-                            ),
                           ),
                           const VerticalDivider(width: 1),
                           Expanded(child: screens[index]),
@@ -1016,20 +1008,19 @@ class _DashboardShellState extends State<DashboardShell> {
                     return screens[index];
                   },
                 ),
-          bottomNavigationBar: MediaQuery.sizeOf(context).width >= 900
-              ? null
-              : Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    NavigationBar(
-                      selectedIndex: index,
-                      onDestinationSelected: (value) =>
-                          setState(() => index = value),
-                      destinations: destinations,
-                    ),
-                    VersionLabel(packageInfoFuture: packageInfoFuture),
-                  ],
+          bottomNavigationBar: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (MediaQuery.sizeOf(context).width < 900)
+                NavigationBar(
+                  selectedIndex: index,
+                  onDestinationSelected: (value) =>
+                      setState(() => index = value),
+                  destinations: destinations,
                 ),
+              VersionLabel(packageInfoFuture: packageInfoFuture),
+            ],
+          ),
         );
       },
     );
@@ -1072,11 +1063,15 @@ class VersionLabel extends StatelessWidget {
               : '${info.version}+${info.buildNumber}';
           return Padding(
             padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
-            child: Text(
-              '$platformLabel version $version',
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
+            child: SizedBox(
+              width: double.infinity,
+              child: Text(
+                '$platformLabel version $version',
+                textAlign: TextAlign.center,
+                softWrap: false,
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
               ),
             ),
           );
