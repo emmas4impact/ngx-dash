@@ -6,3 +6,13 @@ requests
 plotly
 pytz
 streamlit-autorefresh
+fastapi
+uvicorn[standard]
+sqlalchemy
+psycopg[binary]
+pydantic-settings
+python-jose[cryptography]
+passlib[bcrypt]
+bcrypt==4.0.1
+email-validator
+python-dateutil

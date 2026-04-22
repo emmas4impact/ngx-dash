@@ -1,0 +1,9 @@
+.git
+.env
+.venv
+__pycache__/
+.pycache/
+flutter_app/.dart_tool/
+flutter_app/build/
+flutter_app/android/.gradle/
+flutter_app/ios/Pods/
