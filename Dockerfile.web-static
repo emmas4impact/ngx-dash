@@ -1,0 +1,8 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+COPY flutter_app/build/web /app
+COPY scripts/write_frontend_config.py /usr/local/bin/write_frontend_config.py
+
+EXPOSE 8080
+CMD ["sh", "-c", "python /usr/local/bin/write_frontend_config.py && python -m http.server ${PORT:-8080} --bind 0.0.0.0 --directory /app"]
