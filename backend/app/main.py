@@ -265,8 +265,8 @@ def request_email_verification(
             ),
         )
     except Exception as exc:
-        logger.exception("Email verification delivery failed")
-        raise HTTPException(status_code=502, detail=f"Could not send verification email: {exc}") from exc
+        logger.warning("Email verification delivery failed: %s", exc)
+        return MessageResponse(message=f"Could not send verification email yet: {exc}")
 
     return MessageResponse(message="Verification email sent.")
 
@@ -300,8 +300,8 @@ def email_portfolio_report(
             attachment=("ngx-portfolio-report.pdf", pdf, "application/pdf"),
         )
     except Exception as exc:
-        logger.exception("Portfolio report email delivery failed")
-        raise HTTPException(status_code=502, detail=f"Could not email portfolio report: {exc}") from exc
+        logger.warning("Portfolio report email delivery failed: %s", exc)
+        return MessageResponse(message=f"Could not email portfolio report yet: {exc}")
 
     return MessageResponse(message=f"Portfolio report emailed to {user.email}.")
 

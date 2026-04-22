@@ -37,6 +37,8 @@ class Settings(BaseSettings):
     smtp_password: str | None = Field(default=None, validation_alias="SMTP_PASSWORD")
     smtp_from_email: str | None = Field(default=None, validation_alias="SMTP_FROM_EMAIL")
     smtp_use_tls: bool = Field(default=True, validation_alias="SMTP_USE_TLS")
+    resend_api_key: str | None = Field(default=None, validation_alias="RESEND_API_KEY")
+    resend_from_email: str | None = Field(default=None, validation_alias="RESEND_FROM_EMAIL")
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
@@ -59,7 +61,14 @@ class Settings(BaseSettings):
 
     @property
     def email_enabled(self) -> bool:
-        return bool(self.smtp_host and (self.smtp_from_email or self.smtp_username))
+        return bool(
+            (self.resend_api_key and (self.resend_from_email or self.smtp_from_email))
+            or (self.smtp_host and (self.smtp_from_email or self.smtp_username))
+        )
+
+    @property
+    def from_email(self) -> str | None:
+        return self.resend_from_email or self.smtp_from_email or self.smtp_username
 
 
 @lru_cache

@@ -3,14 +3,29 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:fl_chart/fl_chart.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'config.dart';
 
-final apiBaseUrl = configuredApiBaseUrl();
+final apiBaseUrl = normalizeApiBaseUrl(configuredApiBaseUrl());
+
+String normalizeApiBaseUrl(String value) {
+  final trimmed = value.trim().replaceAll(RegExp(r'/+$'), '');
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+    return trimmed;
+  }
+  if (trimmed.startsWith('localhost') ||
+      trimmed.startsWith('127.0.0.1') ||
+      trimmed.startsWith('10.0.2.2')) {
+    return 'http://$trimmed';
+  }
+  return 'https://$trimmed';
+}
 
 void main() {
   runApp(const NgxPortfolioApp());
@@ -877,6 +892,7 @@ class DashboardShell extends StatefulWidget {
 class _DashboardShellState extends State<DashboardShell> {
   int index = 0;
   late Future<AppUser> userFuture = widget.api.me();
+  late final Future<PackageInfo> packageInfoFuture = PackageInfo.fromPlatform();
 
   @override
   Widget build(BuildContext context) {
@@ -983,6 +999,14 @@ class _DashboardShellState extends State<DashboardShell> {
                                 setState(() => index = value),
                             labelType: NavigationRailLabelType.all,
                             destinations: railDestinations,
+                            trailing: Expanded(
+                              child: Align(
+                                alignment: Alignment.bottomCenter,
+                                child: VersionLabel(
+                                  packageInfoFuture: packageInfoFuture,
+                                ),
+                              ),
+                            ),
                           ),
                           const VerticalDivider(width: 1),
                           Expanded(child: screens[index]),
@@ -994,14 +1018,70 @@ class _DashboardShellState extends State<DashboardShell> {
                 ),
           bottomNavigationBar: MediaQuery.sizeOf(context).width >= 900
               ? null
-              : NavigationBar(
-                  selectedIndex: index,
-                  onDestinationSelected: (value) =>
-                      setState(() => index = value),
-                  destinations: destinations,
+              : Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    NavigationBar(
+                      selectedIndex: index,
+                      onDestinationSelected: (value) =>
+                          setState(() => index = value),
+                      destinations: destinations,
+                    ),
+                    VersionLabel(packageInfoFuture: packageInfoFuture),
+                  ],
                 ),
         );
       },
+    );
+  }
+}
+
+class VersionLabel extends StatelessWidget {
+  const VersionLabel({super.key, required this.packageInfoFuture});
+
+  final Future<PackageInfo> packageInfoFuture;
+
+  String get platformLabel {
+    if (kIsWeb) return 'Web';
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.android:
+        return 'Android';
+      case TargetPlatform.iOS:
+        return 'iOS';
+      case TargetPlatform.macOS:
+        return 'macOS';
+      case TargetPlatform.windows:
+        return 'Windows';
+      case TargetPlatform.linux:
+        return 'Linux';
+      case TargetPlatform.fuchsia:
+        return 'Fuchsia';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      top: false,
+      child: FutureBuilder<PackageInfo>(
+        future: packageInfoFuture,
+        builder: (context, snapshot) {
+          final info = snapshot.data;
+          final version = info == null
+              ? '...'
+              : '${info.version}+${info.buildNumber}';
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+            child: Text(
+              '$platformLabel version $version',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          );
+        },
+      ),
     );
   }
 }
@@ -1183,7 +1263,14 @@ class _AccountScreenState extends State<AccountScreen> {
     try {
       final message = await widget.api.requestEmailVerification();
       widget.onProfileChanged();
-      if (mounted) showMessage(context, message);
+      if (mounted) {
+        showMessage(
+          context,
+          message.toLowerCase().contains('sent')
+              ? 'Check your email for the verification link.'
+              : message,
+        );
+      }
     } catch (error) {
       if (mounted) showError(context, error.toString());
     } finally {
@@ -1268,17 +1355,25 @@ class _AccountScreenState extends State<AccountScreen> {
                             ],
                           ),
                         ),
-                        Chip(
-                          avatar: Icon(
-                            user.emailVerified
-                                ? Icons.verified
-                                : Icons.error_outline,
-                            size: 18,
-                          ),
-                          label: Text(
-                            user.emailVerified ? 'Verified' : 'Unverified',
-                          ),
-                        ),
+                        user.emailVerified
+                            ? const Chip(
+                                avatar: Icon(Icons.verified, size: 18),
+                                label: Text('Verified'),
+                              )
+                            : ActionChip(
+                                avatar: sendingVerification
+                                    ? const SizedBox.square(
+                                        dimension: 18,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                        ),
+                                      )
+                                    : const Icon(Icons.error_outline, size: 18),
+                                label: const Text('Unverified'),
+                                onPressed: sendingVerification
+                                    ? null
+                                    : sendVerification,
+                              ),
                       ],
                     ),
                     const SizedBox(height: 16),

@@ -1,8 +1,11 @@
+import base64
+import html
 import io
 import smtplib
 from datetime import datetime, timezone
 from email.message import EmailMessage
 
+import requests
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet
@@ -23,8 +26,18 @@ def send_email(
     if not settings.email_enabled:
         raise RuntimeError("Email is not configured")
 
+    if settings.resend_api_key:
+        send_resend_email(
+            settings,
+            to_email=to_email,
+            subject=subject,
+            body=body,
+            attachment=attachment,
+        )
+        return
+
     message = EmailMessage()
-    message["From"] = settings.smtp_from_email or settings.smtp_username
+    message["From"] = settings.from_email
     message["To"] = to_email
     message["Subject"] = subject
     message.set_content(body)
@@ -40,6 +53,43 @@ def send_email(
         if settings.smtp_username and settings.smtp_password:
             smtp.login(settings.smtp_username, settings.smtp_password)
         smtp.send_message(message)
+
+
+def send_resend_email(
+    settings: Settings,
+    *,
+    to_email: str,
+    subject: str,
+    body: str,
+    attachment: tuple[str, bytes, str] | None = None,
+) -> None:
+    payload: dict = {
+        "from": settings.from_email,
+        "to": [to_email],
+        "subject": subject,
+        "text": body,
+        "html": f"<p>{html.escape(body).replace(chr(10), '<br>')}</p>",
+    }
+    if attachment:
+        filename, content, _mime_type = attachment
+        payload["attachments"] = [
+            {
+                "filename": filename,
+                "content": base64.b64encode(content).decode("ascii"),
+            }
+        ]
+
+    response = requests.post(
+        "https://api.resend.com/emails",
+        headers={
+            "Authorization": f"Bearer {settings.resend_api_key}",
+            "Content-Type": "application/json",
+        },
+        json=payload,
+        timeout=20,
+    )
+    if response.status_code >= 400:
+        raise RuntimeError(f"Resend API error {response.status_code}: {response.text}")
 
 
 def portfolio_report_pdf(user: User, holdings: list[dict]) -> bytes:

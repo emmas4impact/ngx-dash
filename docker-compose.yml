@@ -40,6 +40,8 @@ services:
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-}
       SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-}
     ports:
       - "8000:8000"
 
