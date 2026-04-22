@@ -20,6 +20,13 @@ class User(TimestampMixin, Base):
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(255))
     full_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    address: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    city: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    country: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    email_verified: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    email_verification_token: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    email_verification_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     is_superuser: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
     holdings: Mapped[list["PortfolioHolding"]] = relationship(back_populates="user", cascade="all, delete-orphan")

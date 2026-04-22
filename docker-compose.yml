@@ -32,6 +32,14 @@ services:
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY is required}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080,http://localhost:3000}
       ADMIN_EMAILS: ${ADMIN_EMAILS:-}
+      STOCK_SYNC_INTERVAL_SECONDS: ${STOCK_SYNC_INTERVAL_SECONDS:-900}
+      FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:-http://localhost:8080}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-}
+      SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
     ports:
       - "8000:8000"
 

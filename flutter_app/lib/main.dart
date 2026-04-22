@@ -27,10 +27,12 @@ class _NgxPortfolioAppState extends State<NgxPortfolioApp> {
   final ApiClient api = ApiClient(apiBaseUrl);
   bool loading = true;
   bool authenticated = false;
+  late String? emailVerificationToken;
 
   @override
   void initState() {
     super.initState();
+    emailVerificationToken = Uri.base.queryParameters['verify_email_token'];
     _loadToken();
   }
 
@@ -73,6 +75,12 @@ class _NgxPortfolioAppState extends State<NgxPortfolioApp> {
       ),
       home: loading
           ? const Scaffold(body: Center(child: CircularProgressIndicator()))
+          : emailVerificationToken != null
+          ? EmailVerificationScreen(
+              api: api,
+              token: emailVerificationToken!,
+              onDone: () => setState(() => emailVerificationToken = null),
+            )
           : authenticated
           ? DashboardShell(api: api, onSignOut: _signOut)
           : AuthScreen(api: api, onSignedIn: _signedIn),
@@ -143,6 +151,66 @@ class ApiClient {
     final response = await http.get(_uri('/me'), headers: _headers);
     _expect(response, 200);
     return AppUser.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+  }
+
+  Future<AppUser> updateProfile(ProfileInput input) async {
+    final response = await http.put(
+      _uri('/me'),
+      headers: _headers,
+      body: jsonEncode(input.toJson()),
+    );
+    _expect(response, 200);
+    return AppUser.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+  }
+
+  Future<String> changePassword(
+    String currentPassword,
+    String newPassword,
+  ) async {
+    final response = await http.post(
+      _uri('/me/password'),
+      headers: _headers,
+      body: jsonEncode({
+        'current_password': currentPassword,
+        'new_password': newPassword,
+      }),
+    );
+    _expect(response, 200);
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return data['message']?.toString() ?? 'Password updated.';
+  }
+
+  Future<String> requestEmailVerification() async {
+    final response = await http.post(
+      _uri('/me/email-verification'),
+      headers: _headers,
+    );
+    _expect(response, 200);
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    final link = data['verification_url']?.toString();
+    final message =
+        data['message']?.toString() ?? 'Verification email requested.';
+    return link == null || link.isEmpty ? message : '$message $link';
+  }
+
+  Future<String> verifyEmailToken(String token) async {
+    final response = await http.get(
+      _uri('/auth/verify-email', {'token': token}),
+      headers: _headers,
+    );
+    _expect(response, 200);
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return data['message']?.toString() ?? 'Email address verified.';
+  }
+
+  Future<String> emailPortfolioReport() async {
+    final response = await http.post(
+      _uri('/me/portfolio-report/email'),
+      headers: _headers,
+    );
+    _expect(response, 200);
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return data['message']?.toString() ?? 'Portfolio report request complete.';
   }
 
   Future<List<Stock>> stocks({String? search}) async {
@@ -274,6 +342,15 @@ double? asDouble(dynamic value) {
   return double.tryParse(value.toString());
 }
 
+String? blankToNull(String value) {
+  final trimmed = value.trim();
+  return trimmed.isEmpty ? null : trimmed;
+}
+
+extension StringFallback on String {
+  String withFallback(String fallback) => isEmpty ? fallback : this;
+}
+
 class Stock {
   Stock({
     required this.symbol,
@@ -392,22 +469,74 @@ class AppUser {
     required this.id,
     required this.email,
     this.fullName,
+    this.phone,
+    this.address,
+    this.city,
+    this.country,
+    required this.emailVerified,
     required this.isSuperuser,
+    this.createdAt,
+    this.updatedAt,
   });
 
   final int id;
   final String email;
   final String? fullName;
+  final String? phone;
+  final String? address;
+  final String? city;
+  final String? country;
+  final bool emailVerified;
   final bool isSuperuser;
+  final DateTime? createdAt;
+  final DateTime? updatedAt;
+
+  String get displayName =>
+      fullName == null || fullName!.trim().isEmpty ? email : fullName!.trim();
 
   factory AppUser.fromJson(Map<String, dynamic> json) {
     return AppUser(
       id: (json['id'] as num?)?.toInt() ?? 0,
       email: json['email']?.toString() ?? '',
       fullName: json['full_name'] as String?,
+      phone: json['phone'] as String?,
+      address: json['address'] as String?,
+      city: json['city'] as String?,
+      country: json['country'] as String?,
+      emailVerified: json['email_verified'] == true,
       isSuperuser: json['is_superuser'] == true,
+      createdAt: json['created_at'] == null
+          ? null
+          : DateTime.tryParse(json['created_at'] as String),
+      updatedAt: json['updated_at'] == null
+          ? null
+          : DateTime.tryParse(json['updated_at'] as String),
     );
   }
+}
+
+class ProfileInput {
+  ProfileInput({
+    this.fullName,
+    this.phone,
+    this.address,
+    this.city,
+    this.country,
+  });
+
+  final String? fullName;
+  final String? phone;
+  final String? address;
+  final String? city;
+  final String? country;
+
+  Map<String, dynamic> toJson() => {
+    'full_name': fullName,
+    'phone': phone,
+    'address': address,
+    'city': city,
+    'country': country,
+  };
 }
 
 class PricePoint {
@@ -650,6 +779,91 @@ class _AuthScreenState extends State<AuthScreen> {
   }
 }
 
+class EmailVerificationScreen extends StatefulWidget {
+  const EmailVerificationScreen({
+    super.key,
+    required this.api,
+    required this.token,
+    required this.onDone,
+  });
+
+  final ApiClient api;
+  final String token;
+  final VoidCallback onDone;
+
+  @override
+  State<EmailVerificationScreen> createState() =>
+      _EmailVerificationScreenState();
+}
+
+class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
+  late Future<String> future = widget.api.verifyEmailToken(widget.token);
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: Card(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: FutureBuilder<String>(
+                future: future,
+                builder: (context, snapshot) {
+                  final done =
+                      snapshot.connectionState != ConnectionState.waiting;
+                  final failed = snapshot.hasError;
+                  return Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        done
+                            ? (failed
+                                  ? Icons.error_outline
+                                  : Icons.verified_outlined)
+                            : Icons.mark_email_read_outlined,
+                        size: 48,
+                        color: failed
+                            ? Colors.red.shade700
+                            : Theme.of(context).colorScheme.primary,
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        done
+                            ? (failed
+                                  ? 'Verification failed'
+                                  : 'Email verified')
+                            : 'Verifying email',
+                        style: Theme.of(context).textTheme.headlineSmall,
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        done
+                            ? (failed
+                                  ? snapshot.error.toString()
+                                  : snapshot.data ?? 'Email address verified.')
+                            : 'Please wait while we confirm your email address.',
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 18),
+                      FilledButton.icon(
+                        onPressed: done ? widget.onDone : null,
+                        icon: const Icon(Icons.login),
+                        label: const Text('Continue'),
+                      ),
+                    ],
+                  );
+                },
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class DashboardShell extends StatefulWidget {
   const DashboardShell({super.key, required this.api, required this.onSignOut});
 
@@ -672,14 +886,26 @@ class _DashboardShellState extends State<DashboardShell> {
         final user = snapshot.data;
         final isAdmin = user?.isSuperuser ?? false;
         final screens = [
+          HomeScreen(user: user, api: widget.api),
           PortfolioScreen(api: widget.api),
           StocksScreen(api: widget.api),
           ChartsScreen(api: widget.api),
+          AccountScreen(
+            api: widget.api,
+            userFuture: userFuture,
+            onProfileChanged: () {
+              setState(() => userFuture = widget.api.me());
+            },
+          ),
           if (isAdmin) AdminScreen(api: widget.api),
         ];
         if (index >= screens.length) index = screens.length - 1;
 
         final destinations = [
+          const NavigationDestination(
+            icon: Icon(Icons.home_outlined),
+            label: 'Home',
+          ),
           const NavigationDestination(
             icon: Icon(Icons.account_balance_wallet_outlined),
             label: 'Portfolio',
@@ -692,6 +918,10 @@ class _DashboardShellState extends State<DashboardShell> {
             icon: Icon(Icons.show_chart),
             label: 'Charts',
           ),
+          const NavigationDestination(
+            icon: Icon(Icons.person_outline),
+            label: 'Account',
+          ),
           if (isAdmin)
             const NavigationDestination(
               icon: Icon(Icons.admin_panel_settings_outlined),
@@ -700,6 +930,10 @@ class _DashboardShellState extends State<DashboardShell> {
         ];
 
         final railDestinations = [
+          const NavigationRailDestination(
+            icon: Icon(Icons.home_outlined),
+            label: Text('Home'),
+          ),
           const NavigationRailDestination(
             icon: Icon(Icons.account_balance_wallet_outlined),
             label: Text('Portfolio'),
@@ -712,6 +946,10 @@ class _DashboardShellState extends State<DashboardShell> {
             icon: Icon(Icons.show_chart),
             label: Text('Charts'),
           ),
+          const NavigationRailDestination(
+            icon: Icon(Icons.person_outline),
+            label: Text('Account'),
+          ),
           if (isAdmin)
             const NavigationRailDestination(
               icon: Icon(Icons.admin_panel_settings_outlined),
@@ -721,7 +959,9 @@ class _DashboardShellState extends State<DashboardShell> {
 
         return Scaffold(
           appBar: AppBar(
-            title: const Text('NGX Portfolio'),
+            title: Text(
+              user == null ? 'NGX Portfolio' : 'Welcome, ${user.displayName}',
+            ),
             actions: [
               IconButton(
                 tooltip: 'Sign out',
@@ -766,6 +1006,430 @@ class _DashboardShellState extends State<DashboardShell> {
   }
 }
 
+class HomeScreen extends StatelessWidget {
+  const HomeScreen({super.key, required this.user, required this.api});
+
+  final AppUser? user;
+  final ApiClient api;
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<List<Holding>>(
+      future: api.holdings(),
+      builder: (context, snapshot) {
+        final holdings = snapshot.data ?? [];
+        final totalValue = holdings.fold<double>(
+          0,
+          (sum, item) => sum + item.totalValue,
+        );
+        final totalCost = holdings.fold<double>(
+          0,
+          (sum, item) => sum + item.totalCost,
+        );
+        final profitLoss = totalValue - totalCost;
+
+        return ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            Text(
+              'Welcome, ${user?.displayName ?? 'investor'}',
+              style: Theme.of(context).textTheme.headlineSmall,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              user?.email ?? '',
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 16),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                MetricCard(
+                  label: 'Portfolio value',
+                  value: moneyFormat.format(totalValue),
+                  icon: Icons.payments,
+                ),
+                MetricCard(
+                  label: 'Holdings',
+                  value: holdings.length.toString(),
+                  icon: Icons.pie_chart_outline,
+                ),
+                MetricCard(
+                  label: 'Profit / loss',
+                  value: moneyFormat.format(profitLoss),
+                  icon: profitLoss >= 0
+                      ? Icons.trending_up
+                      : Icons.trending_down,
+                  positive: profitLoss >= 0,
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Profile',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 8),
+                    ProfileLine(
+                      icon: Icons.verified_user_outlined,
+                      label: 'Email status',
+                      value: user?.emailVerified == true
+                          ? 'Verified'
+                          : 'Not verified',
+                    ),
+                    ProfileLine(
+                      icon: Icons.phone_outlined,
+                      label: 'Phone',
+                      value: user?.phone ?? 'Not set',
+                    ),
+                    ProfileLine(
+                      icon: Icons.location_on_outlined,
+                      label: 'Location',
+                      value: [user?.city, user?.country]
+                          .whereType<String>()
+                          .where((value) => value.isNotEmpty)
+                          .join(', ')
+                          .withFallback('Not set'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class AccountScreen extends StatefulWidget {
+  const AccountScreen({
+    super.key,
+    required this.api,
+    required this.userFuture,
+    required this.onProfileChanged,
+  });
+
+  final ApiClient api;
+  final Future<AppUser> userFuture;
+  final VoidCallback onProfileChanged;
+
+  @override
+  State<AccountScreen> createState() => _AccountScreenState();
+}
+
+class _AccountScreenState extends State<AccountScreen> {
+  final fullName = TextEditingController();
+  final phone = TextEditingController();
+  final address = TextEditingController();
+  final city = TextEditingController();
+  final country = TextEditingController();
+  int? loadedUserId;
+  bool savingProfile = false;
+  bool sendingVerification = false;
+  bool sendingReport = false;
+
+  @override
+  void dispose() {
+    fullName.dispose();
+    phone.dispose();
+    address.dispose();
+    city.dispose();
+    country.dispose();
+    super.dispose();
+  }
+
+  void loadUser(AppUser user) {
+    if (loadedUserId == user.id) return;
+    loadedUserId = user.id;
+    fullName.text = user.fullName ?? '';
+    phone.text = user.phone ?? '';
+    address.text = user.address ?? '';
+    city.text = user.city ?? '';
+    country.text = user.country ?? '';
+  }
+
+  Future<void> saveProfile() async {
+    setState(() => savingProfile = true);
+    try {
+      await widget.api.updateProfile(
+        ProfileInput(
+          fullName: blankToNull(fullName.text),
+          phone: blankToNull(phone.text),
+          address: blankToNull(address.text),
+          city: blankToNull(city.text),
+          country: blankToNull(country.text),
+        ),
+      );
+      loadedUserId = null;
+      widget.onProfileChanged();
+      if (mounted) showMessage(context, 'Profile updated.');
+    } catch (error) {
+      if (mounted) showError(context, error.toString());
+    } finally {
+      if (mounted) setState(() => savingProfile = false);
+    }
+  }
+
+  Future<void> sendVerification() async {
+    setState(() => sendingVerification = true);
+    try {
+      final message = await widget.api.requestEmailVerification();
+      widget.onProfileChanged();
+      if (mounted) showMessage(context, message);
+    } catch (error) {
+      if (mounted) showError(context, error.toString());
+    } finally {
+      if (mounted) setState(() => sendingVerification = false);
+    }
+  }
+
+  Future<void> sendReport() async {
+    setState(() => sendingReport = true);
+    try {
+      final message = await widget.api.emailPortfolioReport();
+      if (mounted) showMessage(context, message);
+    } catch (error) {
+      if (mounted) showError(context, error.toString());
+    } finally {
+      if (mounted) setState(() => sendingReport = false);
+    }
+  }
+
+  Future<void> changePassword() async {
+    final result = await showDialog<PasswordInput>(
+      context: context,
+      builder: (context) => const PasswordDialog(),
+    );
+    if (result == null) return;
+    try {
+      final message = await widget.api.changePassword(
+        result.currentPassword,
+        result.newPassword,
+      );
+      if (mounted) showMessage(context, message);
+    } catch (error) {
+      if (mounted) showError(context, error.toString());
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<AppUser>(
+      future: widget.userFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        final user = snapshot.data;
+        if (user == null) {
+          return const EmptyState(
+            icon: Icons.person_off_outlined,
+            text: 'Profile could not be loaded.',
+          );
+        }
+        loadUser(user);
+
+        return ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        CircleAvatar(
+                          child: Text(
+                            user.displayName.isEmpty
+                                ? '?'
+                                : user.displayName[0].toUpperCase(),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                user.displayName,
+                                style: Theme.of(context).textTheme.titleLarge,
+                              ),
+                              Text(user.email),
+                            ],
+                          ),
+                        ),
+                        Chip(
+                          avatar: Icon(
+                            user.emailVerified
+                                ? Icons.verified
+                                : Icons.error_outline,
+                            size: 18,
+                          ),
+                          label: Text(
+                            user.emailVerified ? 'Verified' : 'Unverified',
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    ProfileLine(
+                      icon: Icons.phone_outlined,
+                      label: 'Phone',
+                      value: user.phone ?? 'Not set',
+                    ),
+                    ProfileLine(
+                      icon: Icons.home_outlined,
+                      label: 'Address',
+                      value: user.address ?? 'Not set',
+                    ),
+                    ProfileLine(
+                      icon: Icons.location_city_outlined,
+                      label: 'City',
+                      value: user.city ?? 'Not set',
+                    ),
+                    ProfileLine(
+                      icon: Icons.public,
+                      label: 'Country',
+                      value: user.country ?? 'Not set',
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      'Update profile',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: fullName,
+                      decoration: const InputDecoration(
+                        labelText: 'Full name',
+                        prefixIcon: Icon(Icons.person_outline),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: phone,
+                      keyboardType: TextInputType.phone,
+                      decoration: const InputDecoration(
+                        labelText: 'Phone',
+                        prefixIcon: Icon(Icons.phone_outlined),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: address,
+                      decoration: const InputDecoration(
+                        labelText: 'Address',
+                        prefixIcon: Icon(Icons.home_outlined),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 12,
+                      children: [
+                        SizedBox(
+                          width: 280,
+                          child: TextField(
+                            controller: city,
+                            decoration: const InputDecoration(
+                              labelText: 'City',
+                              prefixIcon: Icon(Icons.location_city_outlined),
+                            ),
+                          ),
+                        ),
+                        SizedBox(
+                          width: 280,
+                          child: TextField(
+                            controller: country,
+                            decoration: const InputDecoration(
+                              labelText: 'Country',
+                              prefixIcon: Icon(Icons.public),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: FilledButton.icon(
+                        onPressed: savingProfile ? null : saveProfile,
+                        icon: savingProfile
+                            ? const SizedBox.square(
+                                dimension: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.save_outlined),
+                        label: const Text('Save profile'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                FilledButton.icon(
+                  onPressed: user.emailVerified || sendingVerification
+                      ? null
+                      : sendVerification,
+                  icon: sendingVerification
+                      ? const SizedBox.square(
+                          dimension: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.mark_email_read_outlined),
+                  label: const Text('Verify email'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: sendingReport ? null : sendReport,
+                  icon: sendingReport
+                      ? const SizedBox.square(
+                          dimension: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.picture_as_pdf_outlined),
+                  label: const Text('Email portfolio PDF'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: changePassword,
+                  icon: const Icon(Icons.lock_reset),
+                  label: const Text('Change password'),
+                ),
+              ],
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
 class PortfolioScreen extends StatefulWidget {
   const PortfolioScreen({super.key, required this.api});
 
@@ -782,7 +1446,7 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
   @override
   void initState() {
     super.initState();
-    refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+    refreshTimer = Timer.periodic(const Duration(minutes: 15), (_) {
       if (mounted) refresh();
     });
   }
@@ -961,7 +1625,7 @@ class _StocksScreenState extends State<StocksScreen> {
   @override
   void initState() {
     super.initState();
-    refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+    refreshTimer = Timer.periodic(const Duration(minutes: 15), (_) {
       if (mounted) refresh();
     });
   }
@@ -1548,6 +2212,137 @@ class _HoldingDialogState extends State<HoldingDialog> {
           label: const Text('Save'),
         ),
       ],
+    );
+  }
+}
+
+class PasswordInput {
+  const PasswordInput({
+    required this.currentPassword,
+    required this.newPassword,
+  });
+
+  final String currentPassword;
+  final String newPassword;
+}
+
+class PasswordDialog extends StatefulWidget {
+  const PasswordDialog({super.key});
+
+  @override
+  State<PasswordDialog> createState() => _PasswordDialogState();
+}
+
+class _PasswordDialogState extends State<PasswordDialog> {
+  final currentPassword = TextEditingController();
+  final newPassword = TextEditingController();
+  final confirmPassword = TextEditingController();
+
+  @override
+  void dispose() {
+    currentPassword.dispose();
+    newPassword.dispose();
+    confirmPassword.dispose();
+    super.dispose();
+  }
+
+  void submit() {
+    if (newPassword.text.length < 8) {
+      showError(context, 'New password must be at least 8 characters.');
+      return;
+    }
+    if (newPassword.text != confirmPassword.text) {
+      showError(context, 'New passwords do not match.');
+      return;
+    }
+    Navigator.of(context).pop(
+      PasswordInput(
+        currentPassword: currentPassword.text,
+        newPassword: newPassword.text,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Change password'),
+      content: SizedBox(
+        width: 420,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: currentPassword,
+              obscureText: true,
+              decoration: const InputDecoration(
+                labelText: 'Current password',
+                prefixIcon: Icon(Icons.lock_outline),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: newPassword,
+              obscureText: true,
+              decoration: const InputDecoration(
+                labelText: 'New password',
+                prefixIcon: Icon(Icons.lock_reset),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: confirmPassword,
+              obscureText: true,
+              decoration: const InputDecoration(
+                labelText: 'Confirm new password',
+                prefixIcon: Icon(Icons.verified_user_outlined),
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton.icon(
+          onPressed: submit,
+          icon: const Icon(Icons.lock_reset),
+          label: const Text('Update password'),
+        ),
+      ],
+    );
+  }
+}
+
+class ProfileLine extends StatelessWidget {
+  const ProfileLine({
+    super.key,
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        children: [
+          Icon(icon, size: 20, color: Theme.of(context).colorScheme.primary),
+          const SizedBox(width: 10),
+          SizedBox(
+            width: 94,
+            child: Text(label, style: Theme.of(context).textTheme.labelMedium),
+          ),
+          Expanded(child: Text(value)),
+        ],
+      ),
     );
   }
 }

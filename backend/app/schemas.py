@@ -23,9 +23,34 @@ class UserOut(BaseModel):
     id: int
     email: EmailStr
     full_name: str | None = None
+    phone: str | None = None
+    address: str | None = None
+    city: str | None = None
+    country: str | None = None
+    email_verified: bool = False
     is_superuser: bool = False
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class ProfileUpdate(BaseModel):
+    full_name: str | None = Field(default=None, max_length=255)
+    phone: str | None = Field(default=None, max_length=64)
+    address: str | None = Field(default=None, max_length=255)
+    city: str | None = Field(default=None, max_length=128)
+    country: str | None = Field(default=None, max_length=128)
+
+
+class PasswordChangeRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=72)
+    new_password: str = Field(min_length=8, max_length=72)
+
+
+class MessageResponse(BaseModel):
+    message: str
+    verification_url: str | None = None
 
 
 class StockOut(BaseModel):

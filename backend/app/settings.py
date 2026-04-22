@@ -29,7 +29,14 @@ class Settings(BaseSettings):
         validation_alias="MARKET_STATUS_URL",
     )
     enable_background_stock_sync: bool = Field(default=True, validation_alias="ENABLE_BACKGROUND_STOCK_SYNC")
-    stock_sync_interval_seconds: int = Field(default=10, validation_alias="STOCK_SYNC_INTERVAL_SECONDS")
+    stock_sync_interval_seconds: int = Field(default=15 * 60, validation_alias="STOCK_SYNC_INTERVAL_SECONDS")
+    frontend_base_url: str = Field(default="http://localhost:8080", validation_alias="FRONTEND_BASE_URL")
+    smtp_host: str | None = Field(default=None, validation_alias="SMTP_HOST")
+    smtp_port: int = Field(default=587, validation_alias="SMTP_PORT")
+    smtp_username: str | None = Field(default=None, validation_alias="SMTP_USERNAME")
+    smtp_password: str | None = Field(default=None, validation_alias="SMTP_PASSWORD")
+    smtp_from_email: str | None = Field(default=None, validation_alias="SMTP_FROM_EMAIL")
+    smtp_use_tls: bool = Field(default=True, validation_alias="SMTP_USE_TLS")
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
@@ -49,6 +56,10 @@ class Settings(BaseSettings):
     @property
     def admin_email_list(self) -> list[str]:
         return [email.strip().lower() for email in self.admin_emails.split(",") if email.strip()]
+
+    @property
+    def email_enabled(self) -> bool:
+        return bool(self.smtp_host and (self.smtp_from_email or self.smtp_username))
 
 
 @lru_cache

@@ -1,7 +1,8 @@
 import asyncio
 import logging
+import secrets
 from contextlib import suppress
-from datetime import date
+from datetime import date, datetime, timezone
 
 from dateutil.relativedelta import relativedelta
 from fastapi import Depends, FastAPI, HTTPException, Query, status
@@ -12,10 +13,14 @@ from sqlalchemy.orm import Session, selectinload
 from .auth import create_access_token, get_current_superuser, get_current_user, hash_password, verify_password
 from .database import Base, SessionLocal, engine, get_db
 from .models import PortfolioHolding, Stock, User
+from .notifications import portfolio_report_pdf, send_email
 from .schemas import (
     HoldingOut,
     HoldingUpsert,
     LoginRequest,
+    MessageResponse,
+    PasswordChangeRequest,
+    ProfileUpdate,
     RegisterRequest,
     StockOut,
     StockPriceOut,
@@ -82,6 +87,16 @@ async def background_stock_sync_loop() -> None:
 def ensure_runtime_schema() -> None:
     with engine.begin() as conn:
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_superuser BOOLEAN NOT NULL DEFAULT false"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(64)"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS address VARCHAR(255)"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS city VARCHAR(128)"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS country VARCHAR(128)"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT false"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_token VARCHAR(128)"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_sent_at TIMESTAMPTZ"))
+        conn.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_users_email_verification_token ON users(email_verification_token)")
+        )
         conn.execute(
             text(
                 """
@@ -133,6 +148,15 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+def _new_email_verification_token() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def _verification_url(token: str) -> str:
+    base_url = settings.frontend_base_url.rstrip("/")
+    return f"{base_url}/?verify_email_token={token}"
+
+
 @app.post("/auth/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
 def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> User:
     existing = db.scalar(select(User).where(User.email == payload.email.lower()))
@@ -145,6 +169,8 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> User:
         full_name=payload.full_name,
         password_hash=hash_password(payload.password),
         is_superuser=user_count == 0 or email in settings.admin_email_list,
+        email_verified=False,
+        email_verification_token=_new_email_verification_token(),
     )
     db.add(user)
     db.commit()
@@ -160,9 +186,124 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse
     return TokenResponse(access_token=create_access_token(user.id))
 
 
+@app.get("/auth/verify-email", response_model=MessageResponse)
+def verify_email(token: str, db: Session = Depends(get_db)) -> MessageResponse:
+    user = db.scalar(select(User).where(User.email_verification_token == token))
+    if user is None:
+        raise HTTPException(status_code=404, detail="Verification link is invalid or expired")
+
+    user.email_verified = True
+    user.email_verification_token = None
+    user.email_verification_sent_at = None
+    db.commit()
+    return MessageResponse(message="Email address verified.")
+
+
 @app.get("/me", response_model=UserOut)
 def me(user: User = Depends(get_current_user)) -> User:
     return user
+
+
+@app.put("/me", response_model=UserOut)
+def update_me(
+    payload: ProfileUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> User:
+    user.full_name = payload.full_name.strip() if payload.full_name else None
+    user.phone = payload.phone.strip() if payload.phone else None
+    user.address = payload.address.strip() if payload.address else None
+    user.city = payload.city.strip() if payload.city else None
+    user.country = payload.country.strip() if payload.country else None
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@app.post("/me/password", response_model=MessageResponse)
+def change_password(
+    payload: PasswordChangeRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> MessageResponse:
+    if not verify_password(payload.current_password, user.password_hash):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    user.password_hash = hash_password(payload.new_password)
+    db.commit()
+    return MessageResponse(message="Password updated.")
+
+
+@app.post("/me/email-verification", response_model=MessageResponse)
+def request_email_verification(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> MessageResponse:
+    if user.email_verified:
+        return MessageResponse(message="Email address is already verified.")
+
+    user.email_verification_token = _new_email_verification_token()
+    user.email_verification_sent_at = datetime.now(timezone.utc)
+    db.commit()
+    verification_url = _verification_url(user.email_verification_token)
+
+    if not settings.email_enabled:
+        return MessageResponse(
+            message="Email is not configured yet. Verification link generated for testing.",
+            verification_url=verification_url,
+        )
+
+    try:
+        send_email(
+            settings,
+            to_email=user.email,
+            subject="Verify your NGX Portfolio email",
+            body=(
+                f"Hello {user.full_name or user.email},\n\n"
+                "Use this link to verify your email address:\n"
+                f"{verification_url}\n\n"
+                "If you did not request this, you can ignore this email."
+            ),
+        )
+    except Exception as exc:
+        logger.exception("Email verification delivery failed")
+        raise HTTPException(status_code=502, detail=f"Could not send verification email: {exc}") from exc
+
+    return MessageResponse(message="Verification email sent.")
+
+
+@app.post("/me/portfolio-report/email", response_model=MessageResponse)
+def email_portfolio_report(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> MessageResponse:
+    holdings = db.scalars(
+        select(PortfolioHolding)
+        .options(selectinload(PortfolioHolding.stock))
+        .where(PortfolioHolding.user_id == user.id)
+        .order_by(PortfolioHolding.stock_symbol)
+    ).all()
+    holding_rows = [holding_to_dict(holding) for holding in holdings]
+    pdf = portfolio_report_pdf(user, holding_rows)
+
+    if not settings.email_enabled:
+        return MessageResponse(message="Portfolio report generated, but email is not configured on the server.")
+
+    try:
+        send_email(
+            settings,
+            to_email=user.email,
+            subject="Your NGX Portfolio Report",
+            body=(
+                f"Hello {user.full_name or user.email},\n\n"
+                "Your latest NGX investment portfolio report is attached as a PDF."
+            ),
+            attachment=("ngx-portfolio-report.pdf", pdf, "application/pdf"),
+        )
+    except Exception as exc:
+        logger.exception("Portfolio report email delivery failed")
+        raise HTTPException(status_code=502, detail=f"Could not email portfolio report: {exc}") from exc
+
+    return MessageResponse(message=f"Portfolio report emailed to {user.email}.")
 
 
 @app.get("/market/status", response_model=MarketStatusOut)
