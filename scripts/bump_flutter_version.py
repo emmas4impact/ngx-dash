@@ -4,6 +4,7 @@ from pathlib import Path
 
 
 PUBSPEC = Path(__file__).resolve().parents[1] / "flutter_app" / "pubspec.yaml"
+APP_VERSION = Path(__file__).resolve().parents[1] / "flutter_app" / "lib" / "app_version.dart"
 VERSION_PATTERN = re.compile(r"^version:\s+(\d+)\.(\d+)\.(\d+)\+(\d+)\s*$", re.MULTILINE)
 
 
@@ -37,6 +38,20 @@ def main() -> None:
     updated = bump(current, part)
     PUBSPEC.write_text(updated, encoding="utf-8")
     match = VERSION_PATTERN.search(updated)
+    if not match:
+        raise SystemExit("Could not read updated Flutter version")
+    major, minor, patch, build = match.groups()
+    APP_VERSION.write_text(
+        "\n".join(
+            [
+                f"const appVersionName = '{major}.{minor}.{patch}';",
+                f"const appBuildNumber = '{build}';",
+                f"const appDisplayVersion = '{major}.{minor}.{patch}+{build}';",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
     print(match.group(0))
 
 

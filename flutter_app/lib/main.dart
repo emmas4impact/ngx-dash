@@ -10,6 +10,7 @@ import 'package:intl/intl.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'app_version.dart';
 import 'config.dart';
 
 final apiBaseUrl = normalizeApiBaseUrl(configuredApiBaseUrl());
@@ -1058,9 +1059,10 @@ class VersionLabel extends StatelessWidget {
         future: packageInfoFuture,
         builder: (context, snapshot) {
           final info = snapshot.data;
-          final version = info == null
-              ? '...'
+          final packageVersion = info == null || info.version.isEmpty
+              ? null
               : '${info.version}+${info.buildNumber}';
+          final version = packageVersion ?? appDisplayVersion;
           return Padding(
             padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
             child: SizedBox(
