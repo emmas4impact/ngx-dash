@@ -1,0 +1,19 @@
+FROM ghcr.io/cirruslabs/flutter:stable AS build
+
+WORKDIR /app
+
+COPY flutter_app/pubspec.* ./
+RUN flutter pub get
+
+COPY flutter_app ./
+
+ARG API_BASE_URL=http://localhost:8000
+RUN flutter build web --release --dart-define=API_BASE_URL=${API_BASE_URL}
+
+FROM python:3.12-slim
+
+WORKDIR /app
+COPY --from=build /app/build/web /app
+
+EXPOSE 8080
+CMD ["sh", "-c", "python -m http.server ${PORT:-8080} --bind 0.0.0.0 --directory /app"]
