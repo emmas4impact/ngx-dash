@@ -2,7 +2,7 @@ import asyncio
 import logging
 import secrets
 from contextlib import suppress
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from dateutil.relativedelta import relativedelta
 from fastapi import Depends, FastAPI, HTTPException, Query, status
@@ -58,6 +58,20 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def stock_history_is_stale(rows: list) -> bool:
+    if not rows:
+        return True
+
+    latest_updated_at = max((row.updated_at for row in rows if row.updated_at), default=None)
+    if latest_updated_at is None:
+        return True
+    if latest_updated_at.tzinfo is None:
+        latest_updated_at = latest_updated_at.replace(tzinfo=timezone.utc)
+
+    refresh_after = timedelta(seconds=max(1, settings.stock_sync_interval_seconds))
+    return datetime.now(timezone.utc) - latest_updated_at > refresh_after
 
 
 async def background_stock_sync_loop() -> None:
@@ -347,7 +361,11 @@ def get_stock_history(
 
     since = date.today() - relativedelta(months=months)
     rows = stock_history_query(db, symbol, since)
-    if stock.ngx_id and (not rows or any(row.open_price is None for row in rows)):
+    if stock.ngx_id and (
+        not rows
+        or any(row.open_price is None for row in rows)
+        or stock_history_is_stale(rows)
+    ):
         upsert_stock_history(db, stock.symbol, stock.ngx_id)
         db.commit()
         rows = stock_history_query(db, symbol, since)

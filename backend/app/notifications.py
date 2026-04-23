@@ -106,7 +106,29 @@ def send_resend_email(
         timeout=20,
     )
     if response.status_code >= 400:
-        raise RuntimeError(f"Resend API error {response.status_code}: {response.text}")
+        raise EmailDeliveryError(_resend_error_message(response))
+
+
+def _resend_error_message(response: requests.Response) -> str:
+    message = response.text
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = None
+
+    if isinstance(payload, dict):
+        message = str(payload.get("message") or payload.get("error") or response.text)
+
+    if response.status_code == 403 and "testing emails" in message.lower():
+        return (
+            "Resend is still in testing mode, so it can only email the Resend account owner's address. "
+            "Verify a sender domain in Resend, then set RESEND_FROM_EMAIL to an address on that domain."
+        )
+
+    if response.status_code == 401:
+        return "Resend rejected the API key. Rotate the key in Resend and update RESEND_API_KEY on Railway."
+
+    return f"Resend API error {response.status_code}: {message}"
 
 
 def portfolio_report_pdf(user: User, holdings: list[dict]) -> bytes:
