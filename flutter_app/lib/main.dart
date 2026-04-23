@@ -12,11 +12,15 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app_version.dart';
 import 'config.dart';
+import 'stock_logo_assets.dart';
 
 final apiBaseUrl = normalizeApiBaseUrl(configuredApiBaseUrl());
 
 String stockLogoUrl(String symbol) =>
     '$apiBaseUrl/public/stocks/${Uri.encodeComponent(symbol)}/logo';
+
+String stockLogoAssetPath(String symbol) =>
+    'assets/company_logos/${symbol.trim().toUpperCase()}.png';
 
 String normalizeApiBaseUrl(String value) {
   final trimmed = value.trim().replaceAll(RegExp(r'/+$'), '');
@@ -1861,12 +1865,13 @@ class CompanyLogo extends StatelessWidget {
       ),
     );
 
-    return ClipOval(
-      child: Image.network(
+    Widget remoteLogo() {
+      return Image.network(
         stockLogoUrl(symbol),
         width: size,
         height: size,
         fit: BoxFit.cover,
+        gaplessPlayback: true,
         errorBuilder: (context, error, stackTrace) => fallback,
         loadingBuilder: (context, child, loadingProgress) {
           if (loadingProgress == null) {
@@ -1874,8 +1879,22 @@ class CompanyLogo extends StatelessWidget {
           }
           return fallback;
         },
-      ),
-    );
+      );
+    }
+
+    final normalizedSymbol = symbol.trim().toUpperCase();
+    final logo = curatedStockLogoSymbols.contains(normalizedSymbol)
+        ? Image.asset(
+            stockLogoAssetPath(normalizedSymbol),
+            width: size,
+            height: size,
+            fit: BoxFit.cover,
+            gaplessPlayback: true,
+            errorBuilder: (context, error, stackTrace) => remoteLogo(),
+          )
+        : remoteLogo();
+
+    return ClipOval(child: logo);
   }
 }
 
