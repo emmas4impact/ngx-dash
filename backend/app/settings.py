@@ -28,6 +28,14 @@ class Settings(BaseSettings):
         default="https://doclib.ngxgroup.com/REST/api/statistics/mktstatus",
         validation_alias="MARKET_STATUS_URL",
     )
+    market_snapshot_url: str = Field(
+        default="https://doclib.ngxgroup.com/REST/api/mrkstat/mrksnapshot",
+        validation_alias="MARKET_SNAPSHOT_URL",
+    )
+    company_news_url: str = Field(
+        default="https://doclib.ngxgroup.com/_api/Web/Lists/GetByTitle('XFinancial_News')/items/",
+        validation_alias="COMPANY_NEWS_URL",
+    )
     enable_background_stock_sync: bool = Field(default=True, validation_alias="ENABLE_BACKGROUND_STOCK_SYNC")
     stock_sync_interval_seconds: int = Field(default=15 * 60, validation_alias="STOCK_SYNC_INTERVAL_SECONDS")
     frontend_base_url: str = Field(default="http://localhost:8080", validation_alias="FRONTEND_BASE_URL")

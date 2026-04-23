@@ -14,17 +14,20 @@ from .auth import create_access_token, get_current_superuser, get_current_user, 
 from .database import Base, SessionLocal, engine, get_db
 from .models import PortfolioHolding, Stock, User
 from .notifications import portfolio_report_pdf, send_email
+from .ngx_client import NgxFetchError, fetch_company_news_from_ngx, fetch_market_snapshot_from_ngx
 from .schemas import (
+    CompanyNewsOut,
     HoldingOut,
     HoldingUpsert,
     LoginRequest,
+    MarketSnapshotOut,
+    MarketStatusOut,
     MessageResponse,
     PasswordChangeRequest,
     ProfileUpdate,
     RegisterRequest,
     StockOut,
     StockPriceOut,
-    MarketStatusOut,
     SyncLogOut,
     SyncResult,
     SyncStatusOut,
@@ -327,6 +330,15 @@ def get_market_status(db: Session = Depends(get_db), _: User = Depends(get_curre
     return get_cached_market_status(db)
 
 
+@app.get("/market/snapshot", response_model=MarketSnapshotOut)
+def get_market_snapshot(_: User = Depends(get_current_user)) -> dict:
+    try:
+        return fetch_market_snapshot_from_ngx()
+    except NgxFetchError as exc:
+        logger.warning("Market snapshot fetch failed: %s", exc)
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
 @app.get("/stocks", response_model=list[StockOut])
 def list_stocks(
     search: str | None = None,
@@ -346,6 +358,25 @@ def get_stock(symbol: str, db: Session = Depends(get_db), _: User = Depends(get_
     if stock is None:
         raise HTTPException(status_code=404, detail="Stock not found")
     return stock
+
+
+@app.get("/stocks/{symbol}/company-news", response_model=list[CompanyNewsOut])
+def get_stock_company_news(
+    symbol: str,
+    limit: int = Query(default=6, ge=1, le=20),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> list[dict]:
+    stock = db.get(Stock, symbol.strip().upper())
+    if stock is None:
+        raise HTTPException(status_code=404, detail="Stock not found")
+    if not stock.ngx_id:
+        return []
+    try:
+        return fetch_company_news_from_ngx(stock.ngx_id)[:limit]
+    except NgxFetchError as exc:
+        logger.warning("Company news fetch failed for %s: %s", stock.symbol, exc)
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @app.get("/stocks/{symbol}/history", response_model=list[StockPriceOut])

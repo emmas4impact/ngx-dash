@@ -157,6 +157,93 @@ def fetch_market_status_from_ngx() -> tuple[str, Any]:
     return status, payload
 
 
+def fetch_market_snapshot_from_ngx() -> dict[str, Any]:
+    try:
+        response = requests.get(
+            get_settings().market_snapshot_url,
+            headers={
+                "Accept": "application/json;odata=verbose",
+                "Content-Type": "application/json;odata=verbose",
+                "Origin": "https://ngxgroup.com",
+                "Referer": "https://ngxgroup.com/exchange/data/company-profile/",
+            },
+            timeout=10,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except requests.RequestException as exc:
+        raise NgxFetchError(f"NGX market snapshot request failed: {exc}") from exc
+    except ValueError as exc:
+        raise NgxFetchError(f"NGX market snapshot response was not valid JSON: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise NgxFetchError("NGX market snapshot response was not an object.")
+
+    return {
+        "asi": _number(_first(payload, ["ASI"])),
+        "deals": _number(_first(payload, ["DEALS"])),
+        "volume": _number(_first(payload, ["VOLUME"])),
+        "value": _number(_first(payload, ["VALUE"])),
+        "market_cap": _number(_first(payload, ["CAP"])),
+        "bond_cap": _number(_first(payload, ["BOND_CAP"])),
+        "etf_cap": _number(_first(payload, ["ETF_CAP"])),
+        "source": "ngx_market_snapshot",
+    }
+
+
+def fetch_company_news_from_ngx(ngx_id: str) -> list[dict[str, Any]]:
+    if not ngx_id:
+        return []
+
+    settings = get_settings()
+    params = {
+        "$select": "URL,Modified,InternationSecIN,Type_of_Submission",
+        "$orderby": "Modified desc",
+        "$filter": (
+            f"InternationSecIN eq '{ngx_id}' and "
+            "(Type_of_Submission eq 'Corporate Actions' or "
+            "Type_of_Submission eq 'Corporate Disclosures' or "
+            "substringof('Meeting' ,Type_of_Submission))"
+        ),
+    }
+    try:
+        response = requests.get(
+            settings.company_news_url,
+            params=params,
+            headers={"Accept": "application/json;odata=verbose"},
+            timeout=15,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except requests.RequestException as exc:
+        raise NgxFetchError(f"NGX company news request failed for {ngx_id}: {exc}") from exc
+    except ValueError as exc:
+        raise NgxFetchError(f"NGX company news response was not valid JSON for {ngx_id}: {exc}") from exc
+
+    results: Any = payload
+    if isinstance(payload, dict):
+        results = payload.get("d", {}).get("results", [])
+    if not isinstance(results, list):
+        raise NgxFetchError(f"NGX company news response was not a list for {ngx_id}.")
+
+    items: list[dict[str, Any]] = []
+    for item in results:
+        if not isinstance(item, dict):
+            continue
+        url_info = item.get("URL")
+        if not isinstance(url_info, dict):
+            url_info = {}
+        items.append(
+            {
+                "title": url_info.get("Description"),
+                "url": url_info.get("Url"),
+                "modified": item.get("Modified"),
+                "ngx_id": item.get("InternationSecIN") or ngx_id,
+                "submission_type": item.get("Type_of_Submission"),
+            }
+        )
+    return items
+
+
 def legacy_seed_stocks() -> list[dict[str, Any]]:
     try:
         from config import STOCK_ID_MAPPING

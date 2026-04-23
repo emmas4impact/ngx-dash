@@ -244,6 +244,12 @@ class ApiClient {
         .toList();
   }
 
+  Future<Stock> stock(String symbol) async {
+    final response = await http.get(_uri('/stocks/$symbol'), headers: _headers);
+    _expect(response, 200);
+    return Stock.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+  }
+
   Future<List<Holding>> holdings() async {
     final response = await http.get(
       _uri('/portfolio/holdings'),
@@ -332,6 +338,29 @@ class ApiClient {
     return MarketStatus.fromJson(
       jsonDecode(response.body) as Map<String, dynamic>,
     );
+  }
+
+  Future<MarketSnapshot> marketSnapshot() async {
+    final response = await http.get(
+      _uri('/market/snapshot'),
+      headers: _headers,
+    );
+    _expect(response, 200);
+    return MarketSnapshot.fromJson(
+      jsonDecode(response.body) as Map<String, dynamic>,
+    );
+  }
+
+  Future<List<CompanyNewsItem>> companyNews(String symbol) async {
+    final response = await http.get(
+      _uri('/stocks/$symbol/company-news', {'limit': '5'}),
+      headers: _headers,
+    );
+    _expect(response, 200);
+    final data = jsonDecode(response.body) as List<dynamic>;
+    return data
+        .map((item) => CompanyNewsItem.fromJson(item as Map<String, dynamic>))
+        .toList();
   }
 
   void _expect(http.Response response, int statusCode) {
@@ -449,6 +478,19 @@ class Holding {
       profitLoss: asDouble(json['profit_loss']) ?? 0,
       profitLossPercent: asDouble(json['profit_loss_percent']),
       notes: json['notes'] as String?,
+    );
+  }
+
+  factory Holding.fromStock(Stock stock) {
+    return Holding(
+      symbol: stock.symbol,
+      name: stock.name,
+      quantity: 0,
+      avgPurchasePrice: 0,
+      currentPrice: stock.lastPrice,
+      totalValue: 0,
+      totalCost: 0,
+      profitLoss: 0,
     );
   }
 }
@@ -595,6 +637,66 @@ class MarketStatus {
           ? null
           : DateTime.tryParse(json['updated_at'] as String),
       stale: json['stale'] == true,
+    );
+  }
+}
+
+class MarketSnapshot {
+  MarketSnapshot({
+    this.asi,
+    this.deals,
+    this.volume,
+    this.value,
+    this.marketCap,
+    this.bondCap,
+    this.etfCap,
+  });
+
+  final double? asi;
+  final double? deals;
+  final double? volume;
+  final double? value;
+  final double? marketCap;
+  final double? bondCap;
+  final double? etfCap;
+
+  factory MarketSnapshot.fromJson(Map<String, dynamic> json) {
+    return MarketSnapshot(
+      asi: asDouble(json['asi']),
+      deals: asDouble(json['deals']),
+      volume: asDouble(json['volume']),
+      value: asDouble(json['value']),
+      marketCap: asDouble(json['market_cap']),
+      bondCap: asDouble(json['bond_cap']),
+      etfCap: asDouble(json['etf_cap']),
+    );
+  }
+}
+
+class CompanyNewsItem {
+  CompanyNewsItem({
+    this.title,
+    this.url,
+    this.modified,
+    this.ngxId,
+    this.submissionType,
+  });
+
+  final String? title;
+  final String? url;
+  final DateTime? modified;
+  final String? ngxId;
+  final String? submissionType;
+
+  factory CompanyNewsItem.fromJson(Map<String, dynamic> json) {
+    return CompanyNewsItem(
+      title: json['title'] as String?,
+      url: json['url'] as String?,
+      modified: json['modified'] == null
+          ? null
+          : DateTime.tryParse(json['modified'] as String),
+      ngxId: json['ngx_id'] as String?,
+      submissionType: json['submission_type'] as String?,
     );
   }
 }
@@ -1533,6 +1635,11 @@ class PortfolioScreen extends StatefulWidget {
 
 class _PortfolioScreenState extends State<PortfolioScreen> {
   late Future<List<Holding>> future = widget.api.holdings();
+  Holding? selectedHolding;
+  Future<Stock>? selectedStockFuture;
+  Future<List<PricePoint>>? selectedHistoryFuture;
+  Future<MarketSnapshot>? selectedSnapshotFuture;
+  Future<List<CompanyNewsItem>>? selectedNewsFuture;
   Timer? refreshTimer;
 
   @override
@@ -1550,7 +1657,25 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
   }
 
   void refresh() {
-    setState(() => future = widget.api.holdings());
+    setState(() {
+      future = widget.api.holdings();
+      if (selectedHolding != null) {
+        selectedStockFuture = widget.api.stock(selectedHolding!.symbol);
+        selectedHistoryFuture = widget.api.history(selectedHolding!.symbol);
+        selectedSnapshotFuture = widget.api.marketSnapshot();
+        selectedNewsFuture = widget.api.companyNews(selectedHolding!.symbol);
+      }
+    });
+  }
+
+  void selectHolding(Holding holding) {
+    setState(() {
+      selectedHolding = holding;
+      selectedStockFuture = widget.api.stock(holding.symbol);
+      selectedHistoryFuture = widget.api.history(holding.symbol);
+      selectedSnapshotFuture = widget.api.marketSnapshot();
+      selectedNewsFuture = widget.api.companyNews(holding.symbol);
+    });
   }
 
   Future<void> addHolding([Holding? holding]) async {
@@ -1570,6 +1695,13 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
   Future<void> remove(String symbol) async {
     try {
       await widget.api.deleteHolding(symbol);
+      if (selectedHolding?.symbol == symbol) {
+        selectedHolding = null;
+        selectedStockFuture = null;
+        selectedHistoryFuture = null;
+        selectedSnapshotFuture = null;
+        selectedNewsFuture = null;
+      }
       refresh();
     } catch (error) {
       if (mounted) showError(context, error.toString());
@@ -1591,6 +1723,16 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
           (sum, item) => sum + item.totalCost,
         );
         final profitLoss = totalValue - totalCost;
+        if (selectedHolding != null &&
+            !holdings.any(
+              (holding) => holding.symbol == selectedHolding!.symbol,
+            )) {
+          selectedHolding = null;
+          selectedStockFuture = null;
+          selectedHistoryFuture = null;
+          selectedSnapshotFuture = null;
+          selectedNewsFuture = null;
+        }
 
         return RefreshIndicator(
           onRefresh: () async => refresh(),
@@ -1644,57 +1786,397 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
                   text: 'No holdings yet.',
                 )
               else
-                ...holdings.map(
-                  (holding) => Card(
-                    child: ListTile(
-                      leading: CircleAvatar(
-                        child: Text(
-                          holding.symbol.isEmpty ? '?' : holding.symbol[0],
-                        ),
-                      ),
-                      title: Text(holding.symbol),
-                      subtitle: Text(
-                        '${holding.name ?? holding.symbol} - ${holding.quantity.toStringAsFixed(2)} shares',
-                      ),
-                      trailing: Wrap(
-                        spacing: 8,
-                        crossAxisAlignment: WrapCrossAlignment.center,
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final selected = selectedHolding;
+                    final detail = PortfolioHoldingDetail(
+                      holding: selected,
+                      stockFuture: selectedStockFuture,
+                      historyFuture: selectedHistoryFuture,
+                      snapshotFuture: selectedSnapshotFuture,
+                      newsFuture: selectedNewsFuture,
+                    );
+                    final holdingCards = holdings
+                        .map(
+                          (holding) => HoldingTile(
+                            holding: holding,
+                            selected: holding.symbol == selected?.symbol,
+                            onTap: () => selectHolding(holding),
+                            onEdit: () => addHolding(holding),
+                            onDelete: () => remove(holding.symbol),
+                          ),
+                        )
+                        .toList();
+                    if (constraints.maxWidth >= 980) {
+                      return Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            crossAxisAlignment: CrossAxisAlignment.end,
-                            children: [
-                              Text(moneyFormat.format(holding.totalValue)),
-                              Text(
-                                '${holding.profitLossPercent?.toStringAsFixed(2) ?? '0.00'}%',
-                                style: TextStyle(
-                                  color: holding.profitLoss >= 0
-                                      ? Colors.green.shade700
-                                      : Colors.red.shade700,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            ],
-                          ),
-                          IconButton(
-                            tooltip: 'Edit',
-                            onPressed: () => addHolding(holding),
-                            icon: const Icon(Icons.edit_outlined),
-                          ),
-                          IconButton(
-                            tooltip: 'Delete',
-                            onPressed: () => remove(holding.symbol),
-                            icon: const Icon(Icons.delete_outline),
-                          ),
+                          Expanded(child: Column(children: holdingCards)),
+                          const SizedBox(width: 16),
+                          SizedBox(width: 440, child: detail),
                         ],
-                      ),
-                    ),
-                  ),
+                      );
+                    }
+                    return Column(
+                      children: [
+                        detail,
+                        const SizedBox(height: 12),
+                        ...holdingCards,
+                      ],
+                    );
+                  },
                 ),
             ],
           ),
         );
       },
+    );
+  }
+}
+
+class HoldingTile extends StatelessWidget {
+  const HoldingTile({
+    super.key,
+    required this.holding,
+    required this.selected,
+    required this.onTap,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  final Holding holding;
+  final bool selected;
+  final VoidCallback onTap;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Card(
+      color: selected
+          ? colorScheme.primaryContainer.withValues(alpha: 0.35)
+          : null,
+      child: ListTile(
+        onTap: onTap,
+        leading: CircleAvatar(
+          child: Text(holding.symbol.isEmpty ? '?' : holding.symbol[0]),
+        ),
+        title: Text(holding.symbol),
+        subtitle: Text(
+          '${holding.name ?? holding.symbol} - ${holding.quantity.toStringAsFixed(2)} shares',
+        ),
+        trailing: Wrap(
+          spacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(moneyFormat.format(holding.totalValue)),
+                Text(
+                  '${holding.profitLossPercent?.toStringAsFixed(2) ?? '0.00'}%',
+                  style: TextStyle(
+                    color: holding.profitLoss >= 0
+                        ? Colors.green.shade700
+                        : Colors.red.shade700,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+            IconButton(
+              tooltip: 'Edit',
+              onPressed: onEdit,
+              icon: const Icon(Icons.edit_outlined),
+            ),
+            IconButton(
+              tooltip: 'Delete',
+              onPressed: onDelete,
+              icon: const Icon(Icons.delete_outline),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class PortfolioHoldingDetail extends StatelessWidget {
+  const PortfolioHoldingDetail({
+    super.key,
+    required this.holding,
+    required this.stockFuture,
+    required this.historyFuture,
+    required this.snapshotFuture,
+    required this.newsFuture,
+  });
+
+  final Holding? holding;
+  final Future<Stock>? stockFuture;
+  final Future<List<PricePoint>>? historyFuture;
+  final Future<MarketSnapshot>? snapshotFuture;
+  final Future<List<CompanyNewsItem>>? newsFuture;
+
+  @override
+  Widget build(BuildContext context) {
+    if (holding == null) {
+      return const Card(
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: EmptyState(
+            icon: Icons.touch_app_outlined,
+            text: 'Select a holding to view its chart and market details.',
+          ),
+        ),
+      );
+    }
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: FutureBuilder<Stock>(
+          future: stockFuture,
+          builder: (context, stockSnapshot) {
+            final stock = stockSnapshot.data;
+            return FutureBuilder<List<PricePoint>>(
+              future: historyFuture,
+              builder: (context, historySnapshot) {
+                return FutureBuilder<MarketSnapshot>(
+                  future: snapshotFuture,
+                  builder: (context, snapshotSnapshot) {
+                    return FutureBuilder<List<CompanyNewsItem>>(
+                      future: newsFuture,
+                      builder: (context, newsSnapshot) {
+                        final points = historySnapshot.data ?? [];
+                        final latest = points.isEmpty ? null : points.last;
+                        final marketSnapshot = snapshotSnapshot.data;
+                        final news = newsSnapshot.data ?? [];
+                        final loading =
+                            stockSnapshot.connectionState ==
+                                ConnectionState.waiting ||
+                            historySnapshot.connectionState ==
+                                ConnectionState.waiting ||
+                            snapshotSnapshot.connectionState ==
+                                ConnectionState.waiting ||
+                            newsSnapshot.connectionState ==
+                                ConnectionState.waiting;
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        holding!.symbol,
+                                        style: Theme.of(
+                                          context,
+                                        ).textTheme.titleLarge,
+                                      ),
+                                      Text(
+                                        holding!.name ??
+                                            stock?.name ??
+                                            holding!.symbol,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                if (loading)
+                                  const SizedBox.square(
+                                    dimension: 22,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                            const SizedBox(height: 16),
+                            SizedBox(
+                              height: 240,
+                              child: points.isEmpty
+                                  ? const EmptyState(
+                                      icon: Icons.show_chart,
+                                      text: 'No chart data available yet.',
+                                    )
+                                  : PriceChart(points: points),
+                            ),
+                            const SizedBox(height: 16),
+                            Wrap(
+                              spacing: 10,
+                              runSpacing: 10,
+                              children: [
+                                StockDetailValue(
+                                  label: 'Current',
+                                  value: stock?.lastPrice == null
+                                      ? 'Not available'
+                                      : moneyFormat.format(stock!.lastPrice),
+                                ),
+                                StockDetailValue(
+                                  label: 'Opening',
+                                  value: latest == null
+                                      ? 'Not available'
+                                      : moneyFormat.format(latest.open),
+                                ),
+                                StockDetailValue(
+                                  label: 'Closing',
+                                  value: latest == null
+                                      ? 'Not available'
+                                      : moneyFormat.format(latest.close),
+                                ),
+                                StockDetailValue(
+                                  label: 'Volume',
+                                  value: stock?.volume == null
+                                      ? 'Not available'
+                                      : compactFormat.format(stock!.volume),
+                                ),
+                                StockDetailValue(
+                                  label: 'Market cap',
+                                  value: stock?.marketCap == null
+                                      ? 'Not available'
+                                      : moneyFormat.format(stock!.marketCap),
+                                ),
+                                StockDetailValue(
+                                  label: 'Margin',
+                                  value: stock?.margin == null
+                                      ? 'Not available'
+                                      : '${stock!.margin!.toStringAsFixed(2)}%',
+                                ),
+                                StockDetailValue(
+                                  label: 'ASI',
+                                  value: marketSnapshot?.asi == null
+                                      ? 'Not available'
+                                      : compactFormat.format(
+                                          marketSnapshot!.asi,
+                                        ),
+                                ),
+                                StockDetailValue(
+                                  label: 'Deals',
+                                  value: marketSnapshot?.deals == null
+                                      ? 'Not available'
+                                      : compactFormat.format(
+                                          marketSnapshot!.deals,
+                                        ),
+                                ),
+                                StockDetailValue(
+                                  label: 'Market value',
+                                  value: marketSnapshot?.value == null
+                                      ? 'Not available'
+                                      : moneyFormat.format(
+                                          marketSnapshot!.value,
+                                        ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 18),
+                            Text(
+                              'Company updates',
+                              style: Theme.of(context).textTheme.titleMedium,
+                            ),
+                            const SizedBox(height: 8),
+                            if (news.isEmpty)
+                              Text(
+                                newsSnapshot.connectionState ==
+                                        ConnectionState.waiting
+                                    ? 'Loading updates...'
+                                    : 'No recent updates available.',
+                              )
+                            else
+                              ...news.map(
+                                (item) => CompanyNewsTile(item: item),
+                              ),
+                          ],
+                        );
+                      },
+                    );
+                  },
+                );
+              },
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class CompanyNewsTile extends StatelessWidget {
+  const CompanyNewsTile({super.key, required this.item});
+
+  final CompanyNewsItem item;
+
+  @override
+  Widget build(BuildContext context) {
+    final modified = item.modified == null
+        ? null
+        : DateFormat.yMMMd().format(item.modified!);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.description_outlined, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  item.title ?? 'Untitled update',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+                ),
+                Text(
+                  [item.submissionType?.trim(), modified]
+                      .whereType<String>()
+                      .where((value) => value.isNotEmpty)
+                      .join(' - '),
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class StockDetailValue extends StatelessWidget {
+  const StockDetailValue({super.key, required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 132,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            value,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.titleSmall,
+          ),
+        ],
+      ),
     );
   }
 }
@@ -1712,6 +2194,11 @@ class _StocksScreenState extends State<StocksScreen> {
   final search = TextEditingController();
   late Future<List<Stock>> future = widget.api.stocks();
   late Future<MarketStatus> marketStatusFuture = widget.api.marketStatus();
+  Stock? selectedStock;
+  Future<Stock>? selectedStockFuture;
+  Future<List<PricePoint>>? selectedHistoryFuture;
+  Future<MarketSnapshot>? selectedSnapshotFuture;
+  Future<List<CompanyNewsItem>>? selectedNewsFuture;
   Timer? refreshTimer;
 
   @override
@@ -1733,6 +2220,22 @@ class _StocksScreenState extends State<StocksScreen> {
     setState(() {
       future = widget.api.stocks(search: search.text.trim());
       marketStatusFuture = widget.api.marketStatus();
+      if (selectedStock != null) {
+        selectedStockFuture = widget.api.stock(selectedStock!.symbol);
+        selectedHistoryFuture = widget.api.history(selectedStock!.symbol);
+        selectedSnapshotFuture = widget.api.marketSnapshot();
+        selectedNewsFuture = widget.api.companyNews(selectedStock!.symbol);
+      }
+    });
+  }
+
+  void selectStock(Stock stock) {
+    setState(() {
+      selectedStock = stock;
+      selectedStockFuture = widget.api.stock(stock.symbol);
+      selectedHistoryFuture = widget.api.history(stock.symbol);
+      selectedSnapshotFuture = widget.api.marketSnapshot();
+      selectedNewsFuture = widget.api.companyNews(stock.symbol);
     });
   }
 
@@ -1800,15 +2303,40 @@ class _StocksScreenState extends State<StocksScreen> {
                   text: 'No stocks loaded yet.',
                 );
               }
+              if (selectedStock != null &&
+                  !stocks.any(
+                    (stock) => stock.symbol == selectedStock!.symbol,
+                  )) {
+                selectedStock = null;
+                selectedStockFuture = null;
+                selectedHistoryFuture = null;
+                selectedSnapshotFuture = null;
+                selectedNewsFuture = null;
+              }
               return RefreshIndicator(
                 onRefresh: () async => refresh(),
-                child: ListView.builder(
+                child: ListView(
                   padding: const EdgeInsets.all(16),
-                  itemCount: stocks.length,
-                  itemBuilder: (context, index) => StockTile(
-                    stock: stocks[index],
-                    onAdd: () => addStock(stocks[index]),
-                  ),
+                  children: [
+                    if (selectedStock != null) ...[
+                      PortfolioHoldingDetail(
+                        holding: Holding.fromStock(selectedStock!),
+                        stockFuture: selectedStockFuture,
+                        historyFuture: selectedHistoryFuture,
+                        snapshotFuture: selectedSnapshotFuture,
+                        newsFuture: selectedNewsFuture,
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+                    ...stocks.map(
+                      (stock) => StockTile(
+                        stock: stock,
+                        selected: stock.symbol == selectedStock?.symbol,
+                        onTap: () => selectStock(stock),
+                        onAdd: () => addStock(stock),
+                      ),
+                    ),
+                  ],
                 ),
               );
             },
@@ -2496,9 +3024,17 @@ class MetricCard extends StatelessWidget {
 }
 
 class StockTile extends StatelessWidget {
-  const StockTile({super.key, required this.stock, this.onAdd});
+  const StockTile({
+    super.key,
+    required this.stock,
+    this.selected = false,
+    this.onTap,
+    this.onAdd,
+  });
 
   final Stock stock;
+  final bool selected;
+  final VoidCallback? onTap;
   final VoidCallback? onAdd;
 
   @override
@@ -2507,8 +3043,13 @@ class StockTile extends StatelessWidget {
     final changeColor = change >= 0
         ? Colors.green.shade700
         : Colors.red.shade700;
+    final colorScheme = Theme.of(context).colorScheme;
     return Card(
+      color: selected
+          ? colorScheme.primaryContainer.withValues(alpha: 0.35)
+          : null,
       child: ListTile(
+        onTap: onTap,
         title: Text(stock.symbol),
         subtitle: Text(
           '${stock.name ?? stock.symbol}${stock.sector == null ? '' : ' - ${stock.sector}'}',

@@ -143,3 +143,22 @@ class MarketStatusOut(BaseModel):
     message: str | None = None
     updated_at: datetime | None = None
     stale: bool = False
+
+
+class MarketSnapshotOut(BaseModel):
+    asi: float | None = None
+    deals: float | None = None
+    volume: float | None = None
+    value: float | None = None
+    market_cap: float | None = None
+    bond_cap: float | None = None
+    etf_cap: float | None = None
+    source: str = "ngx_market_snapshot"
+
+
+class CompanyNewsOut(BaseModel):
+    title: str | None = None
+    url: str | None = None
+    modified: datetime | None = None
+    ngx_id: str | None = None
+    submission_type: str | None = None
