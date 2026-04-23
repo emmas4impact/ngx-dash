@@ -15,6 +15,9 @@ import 'config.dart';
 
 final apiBaseUrl = normalizeApiBaseUrl(configuredApiBaseUrl());
 
+String stockLogoUrl(String symbol) =>
+    '$apiBaseUrl/public/stocks/${Uri.encodeComponent(symbol)}/logo';
+
 String normalizeApiBaseUrl(String value) {
   final trimmed = value.trim().replaceAll(RegExp(r'/+$'), '');
   if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
@@ -1834,6 +1837,48 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
   }
 }
 
+class CompanyLogo extends StatelessWidget {
+  const CompanyLogo({super.key, required this.symbol, this.size = 40});
+
+  final String symbol;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final fallback = Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: colorScheme.primaryContainer.withValues(alpha: 0.55),
+        shape: BoxShape.circle,
+      ),
+      alignment: Alignment.center,
+      child: Icon(
+        Icons.business_outlined,
+        size: size * 0.55,
+        color: colorScheme.onPrimaryContainer,
+      ),
+    );
+
+    return ClipOval(
+      child: Image.network(
+        stockLogoUrl(symbol),
+        width: size,
+        height: size,
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) => fallback,
+        loadingBuilder: (context, child, loadingProgress) {
+          if (loadingProgress == null) {
+            return child;
+          }
+          return fallback;
+        },
+      ),
+    );
+  }
+}
+
 class HoldingTile extends StatelessWidget {
   const HoldingTile({
     super.key,
@@ -1870,11 +1915,7 @@ class HoldingTile extends StatelessWidget {
                   children: [
                     Row(
                       children: [
-                        CircleAvatar(
-                          child: Text(
-                            holding.symbol.isEmpty ? '?' : holding.symbol[0],
-                          ),
-                        ),
+                        CompanyLogo(symbol: holding.symbol),
                         const SizedBox(width: 10),
                         Expanded(
                           child: Column(
@@ -1933,9 +1974,7 @@ class HoldingTile extends StatelessWidget {
 
           return ListTile(
             onTap: onTap,
-            leading: CircleAvatar(
-              child: Text(holding.symbol.isEmpty ? '?' : holding.symbol[0]),
-            ),
+            leading: CompanyLogo(symbol: holding.symbol),
             title: Text(holding.symbol),
             subtitle: Text(
               '${holding.name ?? holding.symbol} - ${holding.quantity.toStringAsFixed(2)} shares',
@@ -2088,6 +2127,8 @@ class PortfolioHoldingDetail extends StatelessWidget {
                           children: [
                             Row(
                               children: [
+                                CompanyLogo(symbol: holding!.symbol, size: 44),
+                                const SizedBox(width: 12),
                                 Expanded(
                                   child: Column(
                                     crossAxisAlignment:
@@ -3150,6 +3191,8 @@ class StockTile extends StatelessWidget {
                   children: [
                     Row(
                       children: [
+                        CompanyLogo(symbol: stock.symbol),
+                        const SizedBox(width: 10),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -3209,6 +3252,7 @@ class StockTile extends StatelessWidget {
 
           return ListTile(
             onTap: onTap,
+            leading: CompanyLogo(symbol: stock.symbol),
             title: Text(stock.symbol),
             subtitle: Text(
               '${stock.name ?? stock.symbol}${stock.sector == null ? '' : ' - ${stock.sector}'}',

@@ -1,6 +1,9 @@
 from datetime import date, datetime
+from functools import lru_cache
+from html import unescape
 import re
 from typing import Any
+from urllib.parse import urlparse
 
 import requests
 
@@ -12,6 +15,10 @@ class NgxFetchError(Exception):
 
 
 CHART_ID_PATTERN = re.compile(r"stockchartdata/([A-Z0-9]+)")
+WEBSITE_PATTERN = re.compile(
+    r"Website:\s*</td>\s*<td[^>]*>.*?<a\s+href=\"([^\"]+)\"",
+    re.IGNORECASE | re.DOTALL,
+)
 
 
 def _number(value: Any) -> float | None:
@@ -141,10 +148,10 @@ def fetch_historical_prices(ngx_id: str) -> list[dict[str, Any]]:
     return rows
 
 
-def discover_stock_ngx_id(symbol: str) -> str | None:
+def fetch_company_profile_html(symbol: str) -> str:
     symbol = symbol.strip().upper()
     if not symbol:
-        return None
+        return ""
 
     settings = get_settings()
     try:
@@ -170,8 +177,56 @@ def discover_stock_ngx_id(symbol: str) -> str | None:
     except requests.RequestException as exc:
         raise NgxFetchError(f"NGX company profile request failed for {symbol}: {exc}") from exc
 
-    match = CHART_ID_PATTERN.search(response.text)
+    return response.text
+
+
+@lru_cache(maxsize=512)
+def discover_stock_ngx_id(symbol: str) -> str | None:
+    html = fetch_company_profile_html(symbol)
+    match = CHART_ID_PATTERN.search(html)
     return match.group(1) if match else None
+
+
+@lru_cache(maxsize=512)
+def discover_stock_website_domain(symbol: str) -> str | None:
+    html = fetch_company_profile_html(symbol)
+    match = WEBSITE_PATTERN.search(html)
+    if not match:
+        return None
+
+    website = unescape(match.group(1)).strip()
+    if not website:
+        return None
+    if not website.startswith(("http://", "https://")):
+        website = f"https://{website}"
+
+    parsed = urlparse(website)
+    domain = parsed.netloc.lower().removeprefix("www.")
+    return domain or None
+
+
+@lru_cache(maxsize=512)
+def fetch_stock_logo(symbol: str) -> tuple[bytes, str] | None:
+    domain = discover_stock_website_domain(symbol)
+    if not domain:
+        return None
+
+    try:
+        response = requests.get(
+            "https://www.google.com/s2/favicons",
+            params={"domain": domain, "sz": "64"},
+            headers={"Accept": "image/*"},
+            timeout=10,
+        )
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        raise NgxFetchError(f"Company logo request failed for {symbol}: {exc}") from exc
+
+    if not response.content:
+        return None
+
+    media_type = response.headers.get("Content-Type", "image/png").split(";")[0].strip()
+    return response.content, media_type or "image/png"
 
 
 def fetch_market_status_from_ngx() -> tuple[str, Any]:

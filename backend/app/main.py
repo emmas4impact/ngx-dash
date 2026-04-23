@@ -5,7 +5,7 @@ from contextlib import suppress
 from datetime import date, datetime, timedelta, timezone
 
 from dateutil.relativedelta import relativedelta
-from fastapi import Depends, FastAPI, HTTPException, Query, status
+from fastapi import Depends, FastAPI, HTTPException, Query, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session, selectinload
@@ -19,6 +19,7 @@ from .ngx_client import (
     discover_stock_ngx_id,
     fetch_company_news_from_ngx,
     fetch_market_snapshot_from_ngx,
+    fetch_stock_logo,
 )
 from .schemas import (
     CompanyNewsOut,
@@ -185,6 +186,25 @@ async def shutdown() -> None:
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/public/stocks/{symbol}/logo", include_in_schema=False)
+def public_stock_logo(symbol: str) -> Response:
+    try:
+        logo = fetch_stock_logo(symbol)
+    except NgxFetchError as exc:
+        logger.warning("Stock logo fetch failed for %s: %s", symbol, exc)
+        raise HTTPException(status_code=404, detail="Logo not found") from exc
+
+    if logo is None:
+        raise HTTPException(status_code=404, detail="Logo not found")
+
+    content, media_type = logo
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
 
 
 def _new_email_verification_token() -> str:
