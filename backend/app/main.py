@@ -14,7 +14,12 @@ from .auth import create_access_token, get_current_superuser, get_current_user, 
 from .database import Base, SessionLocal, engine, get_db
 from .models import PortfolioHolding, Stock, User
 from .notifications import portfolio_report_pdf, send_email
-from .ngx_client import NgxFetchError, fetch_company_news_from_ngx, fetch_market_snapshot_from_ngx
+from .ngx_client import (
+    NgxFetchError,
+    discover_stock_ngx_id,
+    fetch_company_news_from_ngx,
+    fetch_market_snapshot_from_ngx,
+)
 from .schemas import (
     CompanyNewsOut,
     HoldingOut,
@@ -75,6 +80,23 @@ def stock_history_is_stale(rows: list) -> bool:
 
     refresh_after = timedelta(seconds=max(1, settings.stock_sync_interval_seconds))
     return datetime.now(timezone.utc) - latest_updated_at > refresh_after
+
+
+def ensure_stock_ngx_id(db: Session, stock: Stock) -> str | None:
+    if stock.ngx_id:
+        return stock.ngx_id
+
+    try:
+        discovered = discover_stock_ngx_id(stock.symbol)
+    except NgxFetchError as exc:
+        logger.warning("NGX chart id discovery failed for %s: %s", stock.symbol, exc)
+        return None
+
+    if discovered:
+        stock.ngx_id = discovered
+        db.commit()
+        db.refresh(stock)
+    return stock.ngx_id
 
 
 async def background_stock_sync_loop() -> None:
@@ -370,10 +392,11 @@ def get_stock_company_news(
     stock = db.get(Stock, symbol.strip().upper())
     if stock is None:
         raise HTTPException(status_code=404, detail="Stock not found")
-    if not stock.ngx_id:
+    ngx_id = ensure_stock_ngx_id(db, stock)
+    if not ngx_id:
         return []
     try:
-        return fetch_company_news_from_ngx(stock.ngx_id)[:limit]
+        return fetch_company_news_from_ngx(ngx_id)[:limit]
     except NgxFetchError as exc:
         logger.warning("Company news fetch failed for %s: %s", stock.symbol, exc)
         raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -390,14 +413,15 @@ def get_stock_history(
     if stock is None:
         raise HTTPException(status_code=404, detail="Stock not found")
 
+    ngx_id = ensure_stock_ngx_id(db, stock)
     since = date.today() - relativedelta(months=months)
     rows = stock_history_query(db, symbol, since)
-    if stock.ngx_id and (
+    if ngx_id and (
         not rows
         or any(row.open_price is None for row in rows)
         or stock_history_is_stale(rows)
     ):
-        upsert_stock_history(db, stock.symbol, stock.ngx_id)
+        upsert_stock_history(db, stock.symbol, ngx_id)
         db.commit()
         rows = stock_history_query(db, symbol, since)
     return rows

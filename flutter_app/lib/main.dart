@@ -1857,47 +1857,168 @@ class HoldingTile extends StatelessWidget {
       color: selected
           ? colorScheme.primaryContainer.withValues(alpha: 0.35)
           : null,
-      child: ListTile(
-        onTap: onTap,
-        leading: CircleAvatar(
-          child: Text(holding.symbol.isEmpty ? '?' : holding.symbol[0]),
-        ),
-        title: Text(holding.symbol),
-        subtitle: Text(
-          '${holding.name ?? holding.symbol} - ${holding.quantity.toStringAsFixed(2)} shares',
-        ),
-        trailing: Wrap(
-          spacing: 8,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.end,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          if (constraints.maxWidth < 620) {
+            return InkWell(
+              onTap: onTap,
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        CircleAvatar(
+                          child: Text(
+                            holding.symbol.isEmpty ? '?' : holding.symbol[0],
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                holding.symbol,
+                                style: Theme.of(context).textTheme.titleMedium,
+                              ),
+                              Text(
+                                holding.name ?? holding.symbol,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Edit',
+                          onPressed: onEdit,
+                          icon: const Icon(Icons.edit_outlined),
+                        ),
+                        IconButton(
+                          tooltip: 'Delete',
+                          onPressed: onDelete,
+                          icon: const Icon(Icons.delete_outline),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 18,
+                      runSpacing: 8,
+                      children: [
+                        StockDetailValue(
+                          label: 'Shares',
+                          value: holding.quantity.toStringAsFixed(2),
+                        ),
+                        StockDetailValue(
+                          label: 'Value',
+                          value: moneyFormat.format(holding.totalValue),
+                        ),
+                        StockDetailValue(
+                          label: 'P/L',
+                          value:
+                              '${holding.profitLossPercent?.toStringAsFixed(2) ?? '0.00'}%',
+                          positive: holding.profitLoss >= 0,
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }
+
+          return ListTile(
+            onTap: onTap,
+            leading: CircleAvatar(
+              child: Text(holding.symbol.isEmpty ? '?' : holding.symbol[0]),
+            ),
+            title: Text(holding.symbol),
+            subtitle: Text(
+              '${holding.name ?? holding.symbol} - ${holding.quantity.toStringAsFixed(2)} shares',
+            ),
+            trailing: Wrap(
+              spacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
-                Text(moneyFormat.format(holding.totalValue)),
-                Text(
-                  '${holding.profitLossPercent?.toStringAsFixed(2) ?? '0.00'}%',
-                  style: TextStyle(
-                    color: holding.profitLoss >= 0
-                        ? Colors.green.shade700
-                        : Colors.red.shade700,
-                    fontWeight: FontWeight.w700,
-                  ),
+                Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(moneyFormat.format(holding.totalValue)),
+                    Text(
+                      '${holding.profitLossPercent?.toStringAsFixed(2) ?? '0.00'}%',
+                      style: TextStyle(
+                        color: holding.profitLoss >= 0
+                            ? Colors.green.shade700
+                            : Colors.red.shade700,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+                IconButton(
+                  tooltip: 'Edit',
+                  onPressed: onEdit,
+                  icon: const Icon(Icons.edit_outlined),
+                ),
+                IconButton(
+                  tooltip: 'Delete',
+                  onPressed: onDelete,
+                  icon: const Icon(Icons.delete_outline),
                 ),
               ],
             ),
-            IconButton(
-              tooltip: 'Edit',
-              onPressed: onEdit,
-              icon: const Icon(Icons.edit_outlined),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class StockDetailValue extends StatelessWidget {
+  const StockDetailValue({
+    super.key,
+    required this.label,
+    required this.value,
+    this.positive,
+  });
+
+  final String label;
+  final String value;
+  final bool? positive;
+
+  @override
+  Widget build(BuildContext context) {
+    final valueColor = positive == null
+        ? null
+        : positive!
+        ? Colors.green.shade700
+        : Colors.red.shade700;
+    return SizedBox(
+      width: 132,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
-            IconButton(
-              tooltip: 'Delete',
-              onPressed: onDelete,
-              icon: const Icon(Icons.delete_outline),
-            ),
-          ],
-        ),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            value,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(
+              context,
+            ).textTheme.titleSmall?.copyWith(color: valueColor),
+          ),
+        ],
       ),
     );
   }
@@ -2142,38 +2263,6 @@ class CompanyNewsTile extends StatelessWidget {
                 ),
               ],
             ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class StockDetailValue extends StatelessWidget {
-  const StockDetailValue({super.key, required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: 132,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-            ),
-          ),
-          const SizedBox(height: 3),
-          Text(
-            value,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.titleSmall,
           ),
         ],
       ),
@@ -3048,61 +3137,133 @@ class StockTile extends StatelessWidget {
       color: selected
           ? colorScheme.primaryContainer.withValues(alpha: 0.35)
           : null,
-      child: ListTile(
-        onTap: onTap,
-        title: Text(stock.symbol),
-        subtitle: Text(
-          '${stock.name ?? stock.symbol}${stock.sector == null ? '' : ' - ${stock.sector}'}',
-        ),
-        trailing: Wrap(
-          spacing: 18,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Text(
-                  stock.lastPrice == null
-                      ? 'No price'
-                      : moneyFormat.format(stock.lastPrice),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          if (constraints.maxWidth < 620) {
+            return InkWell(
+              onTap: onTap,
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                stock.symbol,
+                                style: Theme.of(context).textTheme.titleMedium,
+                              ),
+                              Text(
+                                '${stock.name ?? stock.symbol}${stock.sector == null ? '' : ' - ${stock.sector}'}',
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton.filledTonal(
+                          tooltip: 'Add to portfolio',
+                          onPressed: onAdd,
+                          icon: const Icon(Icons.add),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 18,
+                      runSpacing: 8,
+                      children: [
+                        StockDetailValue(
+                          label: 'Price',
+                          value: stock.lastPrice == null
+                              ? 'No price'
+                              : moneyFormat.format(stock.lastPrice),
+                        ),
+                        StockDetailValue(
+                          label: 'Change',
+                          value: '${change.toStringAsFixed(2)}%',
+                          positive: change >= 0,
+                        ),
+                        StockDetailValue(
+                          label: 'Margin',
+                          value: '${(stock.margin ?? 0).toStringAsFixed(2)}%',
+                        ),
+                        StockDetailValue(
+                          label: 'Volume',
+                          value: stock.volume == null
+                              ? '-'
+                              : compactFormat.format(stock.volume),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
-                Text(
-                  '${change.toStringAsFixed(2)}%',
-                  style: TextStyle(
-                    color: changeColor,
-                    fontWeight: FontWeight.w700,
-                  ),
+              ),
+            );
+          }
+
+          return ListTile(
+            onTap: onTap,
+            title: Text(stock.symbol),
+            subtitle: Text(
+              '${stock.name ?? stock.symbol}${stock.sector == null ? '' : ' - ${stock.sector}'}',
+            ),
+            trailing: Wrap(
+              spacing: 18,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      stock.lastPrice == null
+                          ? 'No price'
+                          : moneyFormat.format(stock.lastPrice),
+                    ),
+                    Text(
+                      '${change.toStringAsFixed(2)}%',
+                      style: TextStyle(
+                        color: changeColor,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+                Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    const Text('Margin'),
+                    Text('${(stock.margin ?? 0).toStringAsFixed(2)}%'),
+                  ],
+                ),
+                Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    const Text('Volume'),
+                    Text(
+                      stock.volume == null
+                          ? '-'
+                          : compactFormat.format(stock.volume),
+                    ),
+                  ],
+                ),
+                IconButton.filledTonal(
+                  tooltip: 'Add to portfolio',
+                  onPressed: onAdd,
+                  icon: const Icon(Icons.add),
                 ),
               ],
             ),
-            Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                const Text('Margin'),
-                Text('${(stock.margin ?? 0).toStringAsFixed(2)}%'),
-              ],
-            ),
-            Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                const Text('Volume'),
-                Text(
-                  stock.volume == null
-                      ? '-'
-                      : compactFormat.format(stock.volume),
-                ),
-              ],
-            ),
-            IconButton.filledTonal(
-              tooltip: 'Add to portfolio',
-              onPressed: onAdd,
-              icon: const Icon(Icons.add),
-            ),
-          ],
-        ),
+          );
+        },
       ),
     );
   }

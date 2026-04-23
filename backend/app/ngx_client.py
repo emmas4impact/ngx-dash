@@ -1,4 +1,5 @@
 from datetime import date, datetime
+import re
 from typing import Any
 
 import requests
@@ -8,6 +9,9 @@ from .settings import get_settings
 
 class NgxFetchError(Exception):
     pass
+
+
+CHART_ID_PATTERN = re.compile(r"stockchartdata/([A-Z0-9]+)")
 
 
 def _number(value: Any) -> float | None:
@@ -135,6 +139,39 @@ def fetch_historical_prices(ngx_id: str) -> list[dict[str, Any]]:
         )
         previous_close = close_price
     return rows
+
+
+def discover_stock_ngx_id(symbol: str) -> str | None:
+    symbol = symbol.strip().upper()
+    if not symbol:
+        return None
+
+    settings = get_settings()
+    try:
+        response = requests.get(
+            settings.company_profile_url,
+            params={
+                "symbol": symbol,
+                "directory": "companydirectory",
+                "tdate": datetime.now().strftime("%Y-%m-%dT00:00:00"),
+            },
+            headers={
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.9",
+                "User-Agent": (
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/124.0.0.0 Safari/537.36"
+                ),
+            },
+            timeout=15,
+        )
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        raise NgxFetchError(f"NGX company profile request failed for {symbol}: {exc}") from exc
+
+    match = CHART_ID_PATTERN.search(response.text)
+    return match.group(1) if match else None
 
 
 def fetch_market_status_from_ngx() -> tuple[str, Any]:

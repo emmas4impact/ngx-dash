@@ -36,6 +36,10 @@ class Settings(BaseSettings):
         default="https://doclib.ngxgroup.com/_api/Web/Lists/GetByTitle('XFinancial_News')/items/",
         validation_alias="COMPANY_NEWS_URL",
     )
+    company_profile_url: str = Field(
+        default="https://ngxgroup.com/exchange/data/company-profile/",
+        validation_alias="COMPANY_PROFILE_URL",
+    )
     enable_background_stock_sync: bool = Field(default=True, validation_alias="ENABLE_BACKGROUND_STOCK_SYNC")
     stock_sync_interval_seconds: int = Field(default=15 * 60, validation_alias="STOCK_SYNC_INTERVAL_SECONDS")
     frontend_base_url: str = Field(default="http://localhost:8080", validation_alias="FRONTEND_BASE_URL")
