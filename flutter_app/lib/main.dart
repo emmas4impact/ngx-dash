@@ -620,6 +620,26 @@ String? blankToNull(String value) {
   return trimmed.isEmpty ? null : trimmed;
 }
 
+String stockPickerLabel(Stock stock) {
+  final symbol = stock.symbol.trim();
+  final rawName = stock.name?.trim() ?? '';
+  if (rawName.isEmpty) return symbol;
+
+  var cleaned = rawName;
+  final symbolPattern = RegExp(
+    '^${RegExp.escape(symbol)}\\b\\s*',
+    caseSensitive: false,
+  );
+  cleaned = cleaned.replaceFirst(symbolPattern, '').trim();
+  cleaned = cleaned.replaceAll(RegExp(r'\s+'), ' ').trim();
+
+  if (cleaned.isEmpty || cleaned.toUpperCase() == symbol.toUpperCase()) {
+    return symbol;
+  }
+
+  return '$symbol $cleaned';
+}
+
 extension StringFallback on String {
   String withFallback(String fallback) => isEmpty ? fallback : this;
 }
@@ -4451,9 +4471,7 @@ class _ChartsScreenState extends State<ChartsScreen> {
                   .map(
                     (stock) => DropdownMenuItem(
                       value: stock.symbol,
-                      child: Text(
-                        '${stock.symbol} ${stock.name ?? ''} (${stock.ngxId})',
-                      ),
+                      child: Text(stockPickerLabel(stock)),
                     ),
                   )
                   .toList(),
