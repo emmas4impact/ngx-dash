@@ -48,6 +48,10 @@ class PasswordChangeRequest(BaseModel):
     new_password: str = Field(min_length=8, max_length=72)
 
 
+class AccountDeleteRequest(BaseModel):
+    password: str = Field(min_length=1, max_length=72)
+
+
 class MessageResponse(BaseModel):
     message: str
     verification_url: str | None = None
@@ -162,3 +166,26 @@ class CompanyNewsOut(BaseModel):
     modified: datetime | None = None
     ngx_id: str | None = None
     submission_type: str | None = None
+
+
+class StockDetailOut(BaseModel):
+    stock: StockOut
+    history: list[StockPriceOut]
+    market_snapshot: MarketSnapshotOut | None = None
+    news: list[CompanyNewsOut] = []
+
+
+class AccountDeletionRequestCreate(BaseModel):
+    email: EmailStr
+    reason: str | None = Field(default=None, max_length=2000)
+
+
+class AccountDeletionRequestOut(BaseModel):
+    id: int
+    email: EmailStr
+    reason: str | None = None
+    source: str
+    status: str
+    created_at: datetime | None = None
+
+    model_config = ConfigDict(from_attributes=True)

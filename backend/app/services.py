@@ -9,7 +9,7 @@ from .models import MarketStatus, PortfolioHolding, Stock, StockPrice, SyncLog, 
 from .ngx_client import (
     NgxFetchError,
     fetch_all_stocks_from_ngx,
-    fetch_historical_prices,
+    fetch_historical_prices_cached,
     fetch_market_status_from_ngx,
     legacy_seed_stocks,
 )
@@ -164,7 +164,7 @@ def get_cached_market_status(db: Session) -> dict:
 
 def upsert_stock_history(db: Session, symbol: str, ngx_id: str) -> int:
     try:
-        rows = fetch_historical_prices(ngx_id)
+        rows = fetch_historical_prices_cached(ngx_id)
     except NgxFetchError as exc:
         record_sync_log(
             db,

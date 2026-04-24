@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     enable_background_stock_sync: bool = Field(default=True, validation_alias="ENABLE_BACKGROUND_STOCK_SYNC")
     stock_sync_interval_seconds: int = Field(default=15 * 60, validation_alias="STOCK_SYNC_INTERVAL_SECONDS")
     frontend_base_url: str = Field(default="http://localhost:8080", validation_alias="FRONTEND_BASE_URL")
+    support_email: str | None = Field(default=None, validation_alias="SUPPORT_EMAIL")
     smtp_host: str | None = Field(default=None, validation_alias="SMTP_HOST")
     smtp_port: int = Field(default=587, validation_alias="SMTP_PORT")
     smtp_username: str | None = Field(default=None, validation_alias="SMTP_USERNAME")
@@ -89,6 +90,10 @@ class Settings(BaseSettings):
         if self.smtp_host:
             return "smtp"
         return "none"
+
+    @property
+    def contact_email(self) -> str | None:
+        return self.support_email or self.from_email or (self.admin_email_list[0] if self.admin_email_list else None)
 
 
 @lru_cache

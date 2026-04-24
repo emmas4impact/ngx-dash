@@ -2,6 +2,8 @@ from datetime import date, datetime
 from functools import lru_cache
 from html import unescape
 import re
+from threading import Lock
+import time
 from typing import Any
 from urllib.parse import urlparse
 
@@ -19,6 +21,43 @@ WEBSITE_PATTERN = re.compile(
     r"Website:\s*</td>\s*<td[^>]*>.*?<a\s+href=\"([^\"]+)\"",
     re.IGNORECASE | re.DOTALL,
 )
+
+_session: requests.Session | None = None
+_session_lock = Lock()
+_ttl_cache_store: dict[tuple[Any, ...], tuple[float, Any]] = {}
+_ttl_cache_lock = Lock()
+
+
+def _get_session() -> requests.Session:
+    global _session
+    if _session is not None:
+        return _session
+    with _session_lock:
+        if _session is None:
+            _session = requests.Session()
+    return _session
+
+
+def _ttl_cache(ttl_seconds: int):
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            key = (func.__name__, args, tuple(sorted(kwargs.items())))
+            now = time.monotonic()
+            with _ttl_cache_lock:
+                cached = _ttl_cache_store.get(key)
+                if cached is not None:
+                    expires_at, value = cached
+                    if expires_at > now:
+                        return value
+                    _ttl_cache_store.pop(key, None)
+            value = func(*args, **kwargs)
+            with _ttl_cache_lock:
+                _ttl_cache_store[key] = (now + ttl_seconds, value)
+            return value
+
+        return wrapper
+
+    return decorator
 
 
 def _number(value: Any) -> float | None:
@@ -90,7 +129,7 @@ def normalize_stock(raw: dict[str, Any], source: str) -> dict[str, Any] | None:
 def fetch_all_stocks_from_ngx() -> list[dict[str, Any]]:
     settings = get_settings()
     try:
-        response = requests.get(
+        response = _get_session().get(
             settings.ngx_ticker_url,
             params={"$filter": "TickerType eq 'EQUITIES'", "page_size": "1000"},
             headers={"Accept": "application/json"},
@@ -115,7 +154,7 @@ def fetch_historical_prices(ngx_id: str) -> list[dict[str, Any]]:
         return []
 
     try:
-        response = requests.get(f"{get_settings().ngx_chart_base_url}{ngx_id}", timeout=20)
+        response = _get_session().get(f"{get_settings().ngx_chart_base_url}{ngx_id}", timeout=20)
         response.raise_for_status()
         payload = response.json()
     except requests.RequestException as exc:
@@ -155,7 +194,7 @@ def fetch_company_profile_html(symbol: str) -> str:
 
     settings = get_settings()
     try:
-        response = requests.get(
+        response = _get_session().get(
             settings.company_profile_url,
             params={
                 "symbol": symbol,
@@ -212,7 +251,7 @@ def fetch_stock_logo(symbol: str) -> tuple[bytes, str] | None:
         return None
 
     try:
-        response = requests.get(
+        response = _get_session().get(
             "https://www.google.com/s2/favicons",
             params={"domain": domain, "sz": "64"},
             headers={"Accept": "image/*"},
@@ -231,7 +270,11 @@ def fetch_stock_logo(symbol: str) -> tuple[bytes, str] | None:
 
 def fetch_market_status_from_ngx() -> tuple[str, Any]:
     try:
-        response = requests.get(get_settings().market_status_url, headers={"Accept": "application/json"}, timeout=10)
+        response = _get_session().get(
+            get_settings().market_status_url,
+            headers={"Accept": "application/json"},
+            timeout=10,
+        )
         response.raise_for_status()
         payload = response.json()
     except requests.RequestException as exc:
@@ -251,7 +294,7 @@ def fetch_market_status_from_ngx() -> tuple[str, Any]:
 
 def fetch_market_snapshot_from_ngx() -> dict[str, Any]:
     try:
-        response = requests.get(
+        response = _get_session().get(
             get_settings().market_snapshot_url,
             headers={
                 "Accept": "application/json;odata=verbose",
@@ -298,7 +341,7 @@ def fetch_company_news_from_ngx(ngx_id: str) -> list[dict[str, Any]]:
         ),
     }
     try:
-        response = requests.get(
+        response = _get_session().get(
             settings.company_news_url,
             params=params,
             headers={"Accept": "application/json;odata=verbose"},
@@ -334,6 +377,21 @@ def fetch_company_news_from_ngx(ngx_id: str) -> list[dict[str, Any]]:
             }
         )
     return items
+
+
+@_ttl_cache(ttl_seconds=60)
+def fetch_market_snapshot_cached() -> dict[str, Any]:
+    return fetch_market_snapshot_from_ngx()
+
+
+@_ttl_cache(ttl_seconds=300)
+def fetch_company_news_cached(ngx_id: str) -> list[dict[str, Any]]:
+    return fetch_company_news_from_ngx(ngx_id)
+
+
+@_ttl_cache(ttl_seconds=900)
+def fetch_historical_prices_cached(ngx_id: str) -> list[dict[str, Any]]:
+    return fetch_historical_prices(ngx_id)
 
 
 def legacy_seed_stocks() -> list[dict[str, Any]]:

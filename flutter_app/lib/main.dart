@@ -115,6 +115,7 @@ class ApiClient {
   ApiClient(this.baseUrl);
 
   final String baseUrl;
+  final http.Client _client = http.Client();
   String? _token;
 
   bool get hasToken => _token != null && _token!.isNotEmpty;
@@ -141,12 +142,15 @@ class ApiClient {
     if (_token != null) 'Authorization': 'Bearer $_token',
   };
 
+  String get privacyPolicyUrl => '$baseUrl/public/privacy-policy';
+  String get accountDeletionUrl => '$baseUrl/public/account-deletion';
+
   Uri _uri(String path, [Map<String, String>? query]) {
     return Uri.parse('$baseUrl$path').replace(queryParameters: query);
   }
 
   Future<void> register(String email, String password, String? fullName) async {
-    final response = await http.post(
+    final response = await _client.post(
       _uri('/auth/register'),
       headers: _headers,
       body: jsonEncode({
@@ -160,7 +164,7 @@ class ApiClient {
   }
 
   Future<void> login(String email, String password) async {
-    final response = await http.post(
+    final response = await _client.post(
       _uri('/auth/login'),
       headers: _headers,
       body: jsonEncode({'email': email, 'password': password}),
@@ -171,13 +175,13 @@ class ApiClient {
   }
 
   Future<AppUser> me() async {
-    final response = await http.get(_uri('/me'), headers: _headers);
+    final response = await _client.get(_uri('/me'), headers: _headers);
     _expect(response, 200);
     return AppUser.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
   }
 
   Future<AppUser> updateProfile(ProfileInput input) async {
-    final response = await http.put(
+    final response = await _client.put(
       _uri('/me'),
       headers: _headers,
       body: jsonEncode(input.toJson()),
@@ -190,7 +194,7 @@ class ApiClient {
     String currentPassword,
     String newPassword,
   ) async {
-    final response = await http.post(
+    final response = await _client.post(
       _uri('/me/password'),
       headers: _headers,
       body: jsonEncode({
@@ -203,8 +207,19 @@ class ApiClient {
     return data['message']?.toString() ?? 'Password updated.';
   }
 
+  Future<String> deleteAccount(String password) async {
+    final response = await _client.post(
+      _uri('/me/delete-account'),
+      headers: _headers,
+      body: jsonEncode({'password': password}),
+    );
+    _expect(response, 200);
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return data['message']?.toString() ?? 'Account deleted.';
+  }
+
   Future<String> requestEmailVerification() async {
-    final response = await http.post(
+    final response = await _client.post(
       _uri('/me/email-verification'),
       headers: _headers,
     );
@@ -217,7 +232,7 @@ class ApiClient {
   }
 
   Future<String> verifyEmailToken(String token) async {
-    final response = await http.get(
+    final response = await _client.get(
       _uri('/auth/verify-email', {'token': token}),
       headers: _headers,
     );
@@ -227,7 +242,7 @@ class ApiClient {
   }
 
   Future<String> emailPortfolioReport() async {
-    final response = await http.post(
+    final response = await _client.post(
       _uri('/me/portfolio-report/email'),
       headers: _headers,
     );
@@ -237,7 +252,7 @@ class ApiClient {
   }
 
   Future<List<Stock>> stocks({String? search}) async {
-    final response = await http.get(
+    final response = await _client.get(
       _uri(
         '/stocks',
         search == null || search.isEmpty ? null : {'search': search},
@@ -252,13 +267,16 @@ class ApiClient {
   }
 
   Future<Stock> stock(String symbol) async {
-    final response = await http.get(_uri('/stocks/$symbol'), headers: _headers);
+    final response = await _client.get(
+      _uri('/stocks/$symbol'),
+      headers: _headers,
+    );
     _expect(response, 200);
     return Stock.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
   }
 
   Future<List<Holding>> holdings() async {
-    final response = await http.get(
+    final response = await _client.get(
       _uri('/portfolio/holdings'),
       headers: _headers,
     );
@@ -270,7 +288,7 @@ class ApiClient {
   }
 
   Future<Holding> saveHolding(HoldingInput input) async {
-    final response = await http.post(
+    final response = await _client.post(
       _uri('/portfolio/holdings'),
       headers: _headers,
       body: jsonEncode(input.toJson()),
@@ -280,7 +298,7 @@ class ApiClient {
   }
 
   Future<void> deleteHolding(String symbol) async {
-    final response = await http.delete(
+    final response = await _client.delete(
       _uri('/portfolio/holdings/$symbol'),
       headers: _headers,
     );
@@ -288,7 +306,7 @@ class ApiClient {
   }
 
   Future<List<PricePoint>> history(String symbol) async {
-    final response = await http.get(
+    final response = await _client.get(
       _uri('/stocks/$symbol/history', {'months': '12'}),
       headers: _headers,
     );
@@ -299,8 +317,19 @@ class ApiClient {
         .toList();
   }
 
+  Future<StockDetailBundle> stockDetail(String symbol) async {
+    final response = await _client.get(
+      _uri('/stocks/$symbol/detail', {'months': '12', 'news_limit': '6'}),
+      headers: _headers,
+    );
+    _expect(response, 200);
+    return StockDetailBundle.fromJson(
+      jsonDecode(response.body) as Map<String, dynamic>,
+    );
+  }
+
   Future<String> syncStocks({bool includeHistory = false}) async {
-    final response = await http.post(
+    final response = await _client.post(
       _uri('/admin/sync/stocks', {
         'include_history': includeHistory.toString(),
       }),
@@ -317,7 +346,7 @@ class ApiClient {
   }
 
   Future<SyncStatus> syncStatus() async {
-    final response = await http.get(
+    final response = await _client.get(
       _uri('/admin/sync/status'),
       headers: _headers,
     );
@@ -328,7 +357,7 @@ class ApiClient {
   }
 
   Future<List<SyncLogEntry>> syncLogs() async {
-    final response = await http.get(
+    final response = await _client.get(
       _uri('/admin/sync/logs', {'limit': '50'}),
       headers: _headers,
     );
@@ -339,8 +368,27 @@ class ApiClient {
         .toList();
   }
 
+  Future<List<AccountDeletionRequestEntry>> accountDeletionRequests() async {
+    final response = await _client.get(
+      _uri('/admin/account-deletion-requests', {'limit': '50'}),
+      headers: _headers,
+    );
+    _expect(response, 200);
+    final data = jsonDecode(response.body) as List<dynamic>;
+    return data
+        .map(
+          (item) => AccountDeletionRequestEntry.fromJson(
+            item as Map<String, dynamic>,
+          ),
+        )
+        .toList();
+  }
+
   Future<MarketStatus> marketStatus() async {
-    final response = await http.get(_uri('/market/status'), headers: _headers);
+    final response = await _client.get(
+      _uri('/market/status'),
+      headers: _headers,
+    );
     _expect(response, 200);
     return MarketStatus.fromJson(
       jsonDecode(response.body) as Map<String, dynamic>,
@@ -348,7 +396,7 @@ class ApiClient {
   }
 
   Future<MarketSnapshot> marketSnapshot() async {
-    final response = await http.get(
+    final response = await _client.get(
       _uri('/market/snapshot'),
       headers: _headers,
     );
@@ -359,7 +407,7 @@ class ApiClient {
   }
 
   Future<List<CompanyNewsItem>> companyNews(String symbol) async {
-    final response = await http.get(
+    final response = await _client.get(
       _uri('/stocks/$symbol/company-news', {'limit': '5'}),
       headers: _headers,
     );
@@ -498,6 +546,39 @@ class Holding {
       totalValue: 0,
       totalCost: 0,
       profitLoss: 0,
+    );
+  }
+}
+
+class StockDetailBundle {
+  StockDetailBundle({
+    required this.stock,
+    required this.history,
+    this.marketSnapshot,
+    required this.news,
+  });
+
+  final Stock stock;
+  final List<PricePoint> history;
+  final MarketSnapshot? marketSnapshot;
+  final List<CompanyNewsItem> news;
+
+  factory StockDetailBundle.fromJson(Map<String, dynamic> json) {
+    final historyJson = json['history'] as List<dynamic>? ?? const [];
+    final newsJson = json['news'] as List<dynamic>? ?? const [];
+    return StockDetailBundle(
+      stock: Stock.fromJson(json['stock'] as Map<String, dynamic>),
+      history: historyJson
+          .map((item) => PricePoint.fromJson(item as Map<String, dynamic>))
+          .toList(),
+      marketSnapshot: json['market_snapshot'] == null
+          ? null
+          : MarketSnapshot.fromJson(
+              json['market_snapshot'] as Map<String, dynamic>,
+            ),
+      news: newsJson
+          .map((item) => CompanyNewsItem.fromJson(item as Map<String, dynamic>))
+          .toList(),
     );
   }
 }
@@ -778,6 +859,37 @@ class SyncLogEntry {
   }
 }
 
+class AccountDeletionRequestEntry {
+  AccountDeletionRequestEntry({
+    required this.id,
+    required this.email,
+    this.reason,
+    required this.source,
+    required this.status,
+    required this.createdAt,
+  });
+
+  final int id;
+  final String email;
+  final String? reason;
+  final String source;
+  final String status;
+  final DateTime createdAt;
+
+  factory AccountDeletionRequestEntry.fromJson(Map<String, dynamic> json) {
+    return AccountDeletionRequestEntry(
+      id: (json['id'] as num?)?.toInt() ?? 0,
+      email: json['email']?.toString() ?? '',
+      reason: json['reason'] as String?,
+      source: json['source']?.toString() ?? 'web',
+      status: json['status']?.toString() ?? 'pending',
+      createdAt:
+          DateTime.tryParse(json['created_at']?.toString() ?? '') ??
+          DateTime.fromMillisecondsSinceEpoch(0),
+    );
+  }
+}
+
 final moneyFormat = NumberFormat.currency(symbol: 'NGN ', decimalDigits: 2);
 final compactFormat = NumberFormat.compact();
 
@@ -1019,6 +1131,7 @@ class _DashboardShellState extends State<DashboardShell> {
           AccountScreen(
             api: widget.api,
             userFuture: userFuture,
+            onSignOut: widget.onSignOut,
             onProfileChanged: () {
               setState(() => userFuture = widget.api.me());
             },
@@ -1300,11 +1413,13 @@ class AccountScreen extends StatefulWidget {
     super.key,
     required this.api,
     required this.userFuture,
+    required this.onSignOut,
     required this.onProfileChanged,
   });
 
   final ApiClient api;
   final Future<AppUser> userFuture;
+  final Future<void> Function() onSignOut;
   final VoidCallback onProfileChanged;
 
   @override
@@ -1321,6 +1436,7 @@ class _AccountScreenState extends State<AccountScreen> {
   bool savingProfile = false;
   bool sendingVerification = false;
   bool sendingReport = false;
+  bool deletingAccount = false;
 
   @override
   void dispose() {
@@ -1410,6 +1526,83 @@ class _AccountScreenState extends State<AccountScreen> {
       if (mounted) showMessage(context, message);
     } catch (error) {
       if (mounted) showError(context, error.toString());
+    }
+  }
+
+  Future<void> showPrivacyPolicy() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => LegalDocumentScreen(
+          title: 'Privacy policy',
+          sections: [
+            LegalSection(
+              heading: 'What Stockfolio NG stores',
+              body:
+                  'Stockfolio NG stores your account details, optional profile fields, and the portfolio information you enter, such as stock symbols, quantities, purchase prices, notes, and email verification state.',
+            ),
+            LegalSection(
+              heading: 'How the data is used',
+              body:
+                  'Your data is used to authenticate you, show your portfolio, generate charts and reports, send account-related emails, and keep the service running securely.',
+            ),
+            LegalSection(
+              heading: 'Sharing and providers',
+              body:
+                  'The app does not sell your personal data. Data may be processed by infrastructure and email delivery providers used to operate the service. Public market data comes from NGX-related endpoints.',
+            ),
+            LegalSection(
+              heading: 'Retention and deletion',
+              body:
+                  'You can delete your account inside the app. That removes the account and associated portfolio records, except where data must be retained for security, fraud prevention, or legal compliance.',
+            ),
+          ],
+          footerText:
+              'Public policy URL: ${widget.api.privacyPolicyUrl}\nAccount deletion page: ${widget.api.accountDeletionUrl}',
+        ),
+      ),
+    );
+  }
+
+  Future<void> showDeletionPolicy() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => LegalDocumentScreen(
+          title: 'Account deletion',
+          sections: [
+            const LegalSection(
+              heading: 'Delete inside the app',
+              body:
+                  'Use the Delete account action in the Account section to permanently remove your account and associated portfolio records after confirming your password.',
+            ),
+            const LegalSection(
+              heading: 'Delete outside the app',
+              body:
+                  'If you cannot access the app, use the public account deletion page to submit a deletion request with your account email address.',
+            ),
+          ],
+          footerText: 'Public deletion URL: ${widget.api.accountDeletionUrl}',
+        ),
+      ),
+    );
+  }
+
+  Future<void> deleteAccount(AppUser user) async {
+    final result = await showDialog<AccountDeletionInput>(
+      context: context,
+      builder: (context) => AccountDeletionDialog(email: user.email),
+    );
+    if (result == null) return;
+
+    setState(() => deletingAccount = true);
+    try {
+      final message = await widget.api.deleteAccount(result.password);
+      if (!mounted) return;
+      showMessage(context, message);
+      await widget.onSignOut();
+    } catch (error) {
+      if (mounted) showError(context, error.toString());
+    } finally {
+      if (mounted) setState(() => deletingAccount = false);
     }
   }
 
@@ -1595,6 +1788,16 @@ class _AccountScreenState extends State<AccountScreen> {
               spacing: 12,
               runSpacing: 12,
               children: [
+                OutlinedButton.icon(
+                  onPressed: showPrivacyPolicy,
+                  icon: const Icon(Icons.privacy_tip_outlined),
+                  label: const Text('Privacy policy'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: showDeletionPolicy,
+                  icon: const Icon(Icons.policy_outlined),
+                  label: const Text('Deletion policy'),
+                ),
                 FilledButton.icon(
                   onPressed: user.emailVerified || sendingVerification
                       ? null
@@ -1622,6 +1825,19 @@ class _AccountScreenState extends State<AccountScreen> {
                   icon: const Icon(Icons.lock_reset),
                   label: const Text('Change password'),
                 ),
+                FilledButton.tonalIcon(
+                  onPressed: deletingAccount ? null : () => deleteAccount(user),
+                  icon: deletingAccount
+                      ? const SizedBox.square(
+                          dimension: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.delete_forever_outlined),
+                  style: FilledButton.styleFrom(
+                    foregroundColor: Colors.red.shade800,
+                  ),
+                  label: const Text('Delete account'),
+                ),
               ],
             ),
           ],
@@ -1643,10 +1859,7 @@ class PortfolioScreen extends StatefulWidget {
 class _PortfolioScreenState extends State<PortfolioScreen> {
   late Future<List<Holding>> future = widget.api.holdings();
   Holding? selectedHolding;
-  Future<Stock>? selectedStockFuture;
-  Future<List<PricePoint>>? selectedHistoryFuture;
-  Future<MarketSnapshot>? selectedSnapshotFuture;
-  Future<List<CompanyNewsItem>>? selectedNewsFuture;
+  Future<StockDetailBundle>? selectedDetailFuture;
   Timer? refreshTimer;
 
   @override
@@ -1667,10 +1880,7 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
     setState(() {
       future = widget.api.holdings();
       if (selectedHolding != null) {
-        selectedStockFuture = widget.api.stock(selectedHolding!.symbol);
-        selectedHistoryFuture = widget.api.history(selectedHolding!.symbol);
-        selectedSnapshotFuture = widget.api.marketSnapshot();
-        selectedNewsFuture = widget.api.companyNews(selectedHolding!.symbol);
+        selectedDetailFuture = widget.api.stockDetail(selectedHolding!.symbol);
       }
     });
   }
@@ -1678,10 +1888,7 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
   void selectHolding(Holding holding) {
     setState(() {
       selectedHolding = holding;
-      selectedStockFuture = widget.api.stock(holding.symbol);
-      selectedHistoryFuture = widget.api.history(holding.symbol);
-      selectedSnapshotFuture = widget.api.marketSnapshot();
-      selectedNewsFuture = widget.api.companyNews(holding.symbol);
+      selectedDetailFuture = widget.api.stockDetail(holding.symbol);
     });
   }
 
@@ -1704,10 +1911,7 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
       await widget.api.deleteHolding(symbol);
       if (selectedHolding?.symbol == symbol) {
         selectedHolding = null;
-        selectedStockFuture = null;
-        selectedHistoryFuture = null;
-        selectedSnapshotFuture = null;
-        selectedNewsFuture = null;
+        selectedDetailFuture = null;
       }
       refresh();
     } catch (error) {
@@ -1735,10 +1939,7 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
               (holding) => holding.symbol == selectedHolding!.symbol,
             )) {
           selectedHolding = null;
-          selectedStockFuture = null;
-          selectedHistoryFuture = null;
-          selectedSnapshotFuture = null;
-          selectedNewsFuture = null;
+          selectedDetailFuture = null;
         }
 
         return RefreshIndicator(
@@ -1798,10 +1999,7 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
                     final selected = selectedHolding;
                     final detail = PortfolioHoldingDetail(
                       holding: selected,
-                      stockFuture: selectedStockFuture,
-                      historyFuture: selectedHistoryFuture,
-                      snapshotFuture: selectedSnapshotFuture,
-                      newsFuture: selectedNewsFuture,
+                      detailFuture: selectedDetailFuture,
                     );
                     final holdingCards = holdings
                         .map(
@@ -2086,17 +2284,11 @@ class PortfolioHoldingDetail extends StatelessWidget {
   const PortfolioHoldingDetail({
     super.key,
     required this.holding,
-    required this.stockFuture,
-    required this.historyFuture,
-    required this.snapshotFuture,
-    required this.newsFuture,
+    required this.detailFuture,
   });
 
   final Holding? holding;
-  final Future<Stock>? stockFuture;
-  final Future<List<PricePoint>>? historyFuture;
-  final Future<MarketSnapshot>? snapshotFuture;
-  final Future<List<CompanyNewsItem>>? newsFuture;
+  final Future<StockDetailBundle>? detailFuture;
 
   @override
   Widget build(BuildContext context) {
@@ -2115,168 +2307,128 @@ class PortfolioHoldingDetail extends StatelessWidget {
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: FutureBuilder<Stock>(
-          future: stockFuture,
-          builder: (context, stockSnapshot) {
-            final stock = stockSnapshot.data;
-            return FutureBuilder<List<PricePoint>>(
-              future: historyFuture,
-              builder: (context, historySnapshot) {
-                return FutureBuilder<MarketSnapshot>(
-                  future: snapshotFuture,
-                  builder: (context, snapshotSnapshot) {
-                    return FutureBuilder<List<CompanyNewsItem>>(
-                      future: newsFuture,
-                      builder: (context, newsSnapshot) {
-                        final points = historySnapshot.data ?? [];
-                        final latest = points.isEmpty ? null : points.last;
-                        final marketSnapshot = snapshotSnapshot.data;
-                        final news = newsSnapshot.data ?? [];
-                        final loading =
-                            stockSnapshot.connectionState ==
-                                ConnectionState.waiting ||
-                            historySnapshot.connectionState ==
-                                ConnectionState.waiting ||
-                            snapshotSnapshot.connectionState ==
-                                ConnectionState.waiting ||
-                            newsSnapshot.connectionState ==
-                                ConnectionState.waiting;
-                        return Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                CompanyLogo(symbol: holding!.symbol, size: 44),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        holding!.symbol,
-                                        style: Theme.of(
-                                          context,
-                                        ).textTheme.titleLarge,
-                                      ),
-                                      Text(
-                                        holding!.name ??
-                                            stock?.name ??
-                                            holding!.symbol,
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                if (loading)
-                                  const SizedBox.square(
-                                    dimension: 22,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                    ),
-                                  ),
-                              ],
-                            ),
-                            const SizedBox(height: 16),
-                            SizedBox(
-                              height: 240,
-                              child: points.isEmpty
-                                  ? const EmptyState(
-                                      icon: Icons.show_chart,
-                                      text: 'No chart data available yet.',
-                                    )
-                                  : PriceChart(points: points),
-                            ),
-                            const SizedBox(height: 16),
-                            Wrap(
-                              spacing: 10,
-                              runSpacing: 10,
-                              children: [
-                                StockDetailValue(
-                                  label: 'Current',
-                                  value: stock?.lastPrice == null
-                                      ? 'Not available'
-                                      : moneyFormat.format(stock!.lastPrice),
-                                ),
-                                StockDetailValue(
-                                  label: 'Opening',
-                                  value: latest == null
-                                      ? 'Not available'
-                                      : moneyFormat.format(latest.open),
-                                ),
-                                StockDetailValue(
-                                  label: 'Closing',
-                                  value: latest == null
-                                      ? 'Not available'
-                                      : moneyFormat.format(latest.close),
-                                ),
-                                StockDetailValue(
-                                  label: 'Volume',
-                                  value: stock?.volume == null
-                                      ? 'Not available'
-                                      : compactFormat.format(stock!.volume),
-                                ),
-                                StockDetailValue(
-                                  label: 'Market cap',
-                                  value: stock?.marketCap == null
-                                      ? 'Not available'
-                                      : moneyFormat.format(stock!.marketCap),
-                                ),
-                                StockDetailValue(
-                                  label: 'Margin',
-                                  value: stock?.margin == null
-                                      ? 'Not available'
-                                      : '${stock!.margin!.toStringAsFixed(2)}%',
-                                ),
-                                StockDetailValue(
-                                  label: 'ASI',
-                                  value: marketSnapshot?.asi == null
-                                      ? 'Not available'
-                                      : compactFormat.format(
-                                          marketSnapshot!.asi,
-                                        ),
-                                ),
-                                StockDetailValue(
-                                  label: 'Deals',
-                                  value: marketSnapshot?.deals == null
-                                      ? 'Not available'
-                                      : compactFormat.format(
-                                          marketSnapshot!.deals,
-                                        ),
-                                ),
-                                StockDetailValue(
-                                  label: 'Market value',
-                                  value: marketSnapshot?.value == null
-                                      ? 'Not available'
-                                      : moneyFormat.format(
-                                          marketSnapshot!.value,
-                                        ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 18),
-                            Text(
-                              'Company updates',
-                              style: Theme.of(context).textTheme.titleMedium,
-                            ),
-                            const SizedBox(height: 8),
-                            if (news.isEmpty)
-                              Text(
-                                newsSnapshot.connectionState ==
-                                        ConnectionState.waiting
-                                    ? 'Loading updates...'
-                                    : 'No recent updates available.',
-                              )
-                            else
-                              ...news.map(
-                                (item) => CompanyNewsTile(item: item),
-                              ),
-                          ],
-                        );
-                      },
-                    );
-                  },
-                );
-              },
+        child: FutureBuilder<StockDetailBundle>(
+          future: detailFuture,
+          builder: (context, snapshot) {
+            final detail = snapshot.data;
+            final stock = detail?.stock;
+            final points = detail?.history ?? [];
+            final latest = points.isEmpty ? null : points.last;
+            final marketSnapshot = detail?.marketSnapshot;
+            final news = detail?.news ?? [];
+            final loading = snapshot.connectionState == ConnectionState.waiting;
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    CompanyLogo(symbol: holding!.symbol, size: 44),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            holding!.symbol,
+                            style: Theme.of(context).textTheme.titleLarge,
+                          ),
+                          Text(holding!.name ?? stock?.name ?? holding!.symbol),
+                        ],
+                      ),
+                    ),
+                    if (loading)
+                      const SizedBox.square(
+                        dimension: 22,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  height: 240,
+                  child: points.isEmpty
+                      ? const EmptyState(
+                          icon: Icons.show_chart,
+                          text: 'No chart data available yet.',
+                        )
+                      : PriceChart(points: points),
+                ),
+                const SizedBox(height: 16),
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: [
+                    StockDetailValue(
+                      label: 'Current',
+                      value: stock?.lastPrice == null
+                          ? 'Not available'
+                          : moneyFormat.format(stock!.lastPrice),
+                    ),
+                    StockDetailValue(
+                      label: 'Opening',
+                      value: latest == null
+                          ? 'Not available'
+                          : moneyFormat.format(latest.open),
+                    ),
+                    StockDetailValue(
+                      label: 'Closing',
+                      value: latest == null
+                          ? 'Not available'
+                          : moneyFormat.format(latest.close),
+                    ),
+                    StockDetailValue(
+                      label: 'Volume',
+                      value: stock?.volume == null
+                          ? 'Not available'
+                          : compactFormat.format(stock!.volume),
+                    ),
+                    StockDetailValue(
+                      label: 'Market cap',
+                      value: stock?.marketCap == null
+                          ? 'Not available'
+                          : moneyFormat.format(stock!.marketCap),
+                    ),
+                    StockDetailValue(
+                      label: 'Margin',
+                      value: stock?.margin == null
+                          ? 'Not available'
+                          : '${stock!.margin!.toStringAsFixed(2)}%',
+                    ),
+                    StockDetailValue(
+                      label: 'ASI',
+                      value: marketSnapshot?.asi == null
+                          ? 'Not available'
+                          : compactFormat.format(marketSnapshot!.asi),
+                    ),
+                    StockDetailValue(
+                      label: 'Deals',
+                      value: marketSnapshot?.deals == null
+                          ? 'Not available'
+                          : compactFormat.format(marketSnapshot!.deals),
+                    ),
+                    StockDetailValue(
+                      label: 'Market value',
+                      value: marketSnapshot?.value == null
+                          ? 'Not available'
+                          : moneyFormat.format(marketSnapshot!.value),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 18),
+                Text(
+                  'Company updates',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 8),
+                if (news.isEmpty)
+                  Text(
+                    loading
+                        ? 'Loading updates...'
+                        : 'No recent updates available.',
+                  )
+                else
+                  ...news.map((item) => CompanyNewsTile(item: item)),
+              ],
             );
           },
         ),
@@ -2344,10 +2496,7 @@ class _StocksScreenState extends State<StocksScreen> {
   late Future<List<Stock>> future = widget.api.stocks();
   late Future<MarketStatus> marketStatusFuture = widget.api.marketStatus();
   Stock? selectedStock;
-  Future<Stock>? selectedStockFuture;
-  Future<List<PricePoint>>? selectedHistoryFuture;
-  Future<MarketSnapshot>? selectedSnapshotFuture;
-  Future<List<CompanyNewsItem>>? selectedNewsFuture;
+  Future<StockDetailBundle>? selectedDetailFuture;
   Timer? refreshTimer;
 
   @override
@@ -2370,10 +2519,7 @@ class _StocksScreenState extends State<StocksScreen> {
       future = widget.api.stocks(search: search.text.trim());
       marketStatusFuture = widget.api.marketStatus();
       if (selectedStock != null) {
-        selectedStockFuture = widget.api.stock(selectedStock!.symbol);
-        selectedHistoryFuture = widget.api.history(selectedStock!.symbol);
-        selectedSnapshotFuture = widget.api.marketSnapshot();
-        selectedNewsFuture = widget.api.companyNews(selectedStock!.symbol);
+        selectedDetailFuture = widget.api.stockDetail(selectedStock!.symbol);
       }
     });
   }
@@ -2381,10 +2527,7 @@ class _StocksScreenState extends State<StocksScreen> {
   void selectStock(Stock stock) {
     setState(() {
       selectedStock = stock;
-      selectedStockFuture = widget.api.stock(stock.symbol);
-      selectedHistoryFuture = widget.api.history(stock.symbol);
-      selectedSnapshotFuture = widget.api.marketSnapshot();
-      selectedNewsFuture = widget.api.companyNews(stock.symbol);
+      selectedDetailFuture = widget.api.stockDetail(stock.symbol);
     });
   }
 
@@ -2457,10 +2600,7 @@ class _StocksScreenState extends State<StocksScreen> {
                     (stock) => stock.symbol == selectedStock!.symbol,
                   )) {
                 selectedStock = null;
-                selectedStockFuture = null;
-                selectedHistoryFuture = null;
-                selectedSnapshotFuture = null;
-                selectedNewsFuture = null;
+                selectedDetailFuture = null;
               }
               return RefreshIndicator(
                 onRefresh: () async => refresh(),
@@ -2470,10 +2610,7 @@ class _StocksScreenState extends State<StocksScreen> {
                     if (selectedStock != null) ...[
                       PortfolioHoldingDetail(
                         holding: Holding.fromStock(selectedStock!),
-                        stockFuture: selectedStockFuture,
-                        historyFuture: selectedHistoryFuture,
-                        snapshotFuture: selectedSnapshotFuture,
-                        newsFuture: selectedNewsFuture,
+                        detailFuture: selectedDetailFuture,
                       ),
                       const SizedBox(height: 12),
                     ],
@@ -2612,12 +2749,16 @@ class AdminScreen extends StatefulWidget {
 class _AdminScreenState extends State<AdminScreen> {
   late Future<SyncStatus> statusFuture = widget.api.syncStatus();
   late Future<List<SyncLogEntry>> logsFuture = widget.api.syncLogs();
+  late Future<List<AccountDeletionRequestEntry>> deletionRequestsFuture = widget
+      .api
+      .accountDeletionRequests();
   bool syncing = false;
 
   void refresh() {
     setState(() {
       statusFuture = widget.api.syncStatus();
       logsFuture = widget.api.syncLogs();
+      deletionRequestsFuture = widget.api.accountDeletionRequests();
     });
   }
 
@@ -2702,6 +2843,64 @@ class _AdminScreenState extends State<AdminScreen> {
                         Padding(
                           padding: const EdgeInsets.only(top: 8),
                           child: Text(status.message!),
+                        ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+          const SizedBox(height: 12),
+          FutureBuilder<List<AccountDeletionRequestEntry>>(
+            future: deletionRequestsFuture,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Card(
+                  child: Padding(
+                    padding: EdgeInsets.all(16),
+                    child: LinearProgressIndicator(),
+                  ),
+                );
+              }
+              final requests = snapshot.data ?? [];
+              return Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Account deletion requests',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      const SizedBox(height: 8),
+                      if (requests.isEmpty)
+                        const Text('No deletion requests yet.')
+                      else
+                        ...requests.map(
+                          (request) => ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            leading: Icon(
+                              request.status == 'pending'
+                                  ? Icons.pending_actions_outlined
+                                  : Icons.check_circle_outline,
+                            ),
+                            title: Text(request.email),
+                            subtitle: Text(
+                              [
+                                DateFormat.yMd().add_jm().format(
+                                  request.createdAt.toLocal(),
+                                ),
+                                'Source: ${request.source}',
+                                if (request.reason != null &&
+                                    request.reason!.isNotEmpty)
+                                  request.reason!,
+                              ].join('\n'),
+                            ),
+                            isThreeLine:
+                                request.reason != null &&
+                                request.reason!.isNotEmpty,
+                          ),
                         ),
                     ],
                   ),
@@ -2979,6 +3178,147 @@ class _HoldingDialogState extends State<HoldingDialog> {
           onPressed: submit,
           icon: const Icon(Icons.save),
           label: const Text('Save'),
+        ),
+      ],
+    );
+  }
+}
+
+class LegalSection {
+  const LegalSection({required this.heading, required this.body});
+
+  final String heading;
+  final String body;
+}
+
+class LegalDocumentScreen extends StatelessWidget {
+  const LegalDocumentScreen({
+    super.key,
+    required this.title,
+    required this.sections,
+    this.footerText,
+  });
+
+  final String title;
+  final List<LegalSection> sections;
+  final String? footerText;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text(title)),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (final section in sections) ...[
+                    Text(
+                      section.heading,
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 8),
+                    Text(section.body),
+                    const SizedBox(height: 16),
+                  ],
+                  if (footerText != null && footerText!.isNotEmpty)
+                    SelectableText(footerText!),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class AccountDeletionInput {
+  const AccountDeletionInput({required this.password});
+
+  final String password;
+}
+
+class AccountDeletionDialog extends StatefulWidget {
+  const AccountDeletionDialog({super.key, required this.email});
+
+  final String email;
+
+  @override
+  State<AccountDeletionDialog> createState() => _AccountDeletionDialogState();
+}
+
+class _AccountDeletionDialogState extends State<AccountDeletionDialog> {
+  final password = TextEditingController();
+  bool confirmed = false;
+
+  @override
+  void dispose() {
+    password.dispose();
+    super.dispose();
+  }
+
+  void submit() {
+    if (!confirmed) {
+      showError(
+        context,
+        'Please confirm that you want to permanently delete the account.',
+      );
+      return;
+    }
+    if (password.text.isEmpty) {
+      showError(context, 'Enter your current password to continue.');
+      return;
+    }
+    Navigator.of(context).pop(AccountDeletionInput(password: password.text));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Delete account'),
+      content: SizedBox(
+        width: 440,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'This will permanently delete the account ${widget.email} and the associated portfolio records.',
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: password,
+              obscureText: true,
+              decoration: const InputDecoration(
+                labelText: 'Current password',
+                prefixIcon: Icon(Icons.lock_outline),
+              ),
+            ),
+            const SizedBox(height: 12),
+            CheckboxListTile(
+              value: confirmed,
+              contentPadding: EdgeInsets.zero,
+              onChanged: (value) => setState(() => confirmed = value ?? false),
+              title: const Text('I understand this action is permanent.'),
+              controlAffinity: ListTileControlAffinity.leading,
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton.icon(
+          onPressed: submit,
+          icon: const Icon(Icons.delete_forever_outlined),
+          label: const Text('Delete account'),
         ),
       ],
     );

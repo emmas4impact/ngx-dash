@@ -106,3 +106,13 @@ class PortfolioHolding(TimestampMixin, Base):
 
     user: Mapped[User] = relationship(back_populates="holdings")
     stock: Mapped[Stock] = relationship(back_populates="holdings")
+
+
+class AccountDeletionRequest(TimestampMixin, Base):
+    __tablename__ = "account_deletion_requests"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    email: Mapped[str] = mapped_column(String(255), index=True)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source: Mapped[str] = mapped_column(String(32), default="web")
+    status: Mapped[str] = mapped_column(String(32), default="pending", index=True)

@@ -5,23 +5,30 @@ from contextlib import suppress
 from datetime import date, datetime, timedelta, timezone
 
 from dateutil.relativedelta import relativedelta
-from fastapi import Depends, FastAPI, HTTPException, Query, Response, status
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import func, select, text
+from fastapi.responses import HTMLResponse
+from sqlalchemy import desc, func, select, text
 from sqlalchemy.orm import Session, selectinload
 
 from .auth import create_access_token, get_current_superuser, get_current_user, hash_password, verify_password
 from .database import Base, SessionLocal, engine, get_db
-from .models import PortfolioHolding, Stock, User
+from .legal import render_account_deletion_html, render_privacy_policy_html
+from .models import AccountDeletionRequest, PortfolioHolding, Stock, User
 from .notifications import portfolio_report_pdf, send_email
 from .ngx_client import (
     NgxFetchError,
     discover_stock_ngx_id,
+    fetch_company_news_cached,
     fetch_company_news_from_ngx,
+    fetch_market_snapshot_cached,
     fetch_market_snapshot_from_ngx,
     fetch_stock_logo,
 )
 from .schemas import (
+    AccountDeleteRequest,
+    AccountDeletionRequestCreate,
+    AccountDeletionRequestOut,
     CompanyNewsOut,
     HoldingOut,
     HoldingUpsert,
@@ -33,6 +40,7 @@ from .schemas import (
     ProfileUpdate,
     RegisterRequest,
     StockOut,
+    StockDetailOut,
     StockPriceOut,
     SyncLogOut,
     SyncResult,
@@ -207,6 +215,68 @@ def public_stock_logo(symbol: str) -> Response:
     )
 
 
+@app.get("/public/privacy-policy", include_in_schema=False, response_class=HTMLResponse)
+def public_privacy_policy(request: Request) -> HTMLResponse:
+    privacy_url = str(request.url_for("public_privacy_policy"))
+    deletion_url = str(request.url_for("public_account_deletion"))
+    return HTMLResponse(render_privacy_policy_html(settings, privacy_url=privacy_url, deletion_url=deletion_url))
+
+
+@app.get("/public/account-deletion", include_in_schema=False, response_class=HTMLResponse, name="public_account_deletion")
+def public_account_deletion(request: Request) -> HTMLResponse:
+    return HTMLResponse(
+        render_account_deletion_html(
+            settings,
+            post_url=str(request.url_for("submit_account_deletion_request")),
+            privacy_url=str(request.url_for("public_privacy_policy")),
+        )
+    )
+
+
+@app.post(
+    "/public/account-deletion-request",
+    include_in_schema=False,
+    response_model=MessageResponse,
+    name="submit_account_deletion_request",
+)
+def submit_account_deletion_request(
+    payload: AccountDeletionRequestCreate,
+    db: Session = Depends(get_db),
+) -> MessageResponse:
+    request_row = AccountDeletionRequest(
+        email=payload.email.lower(),
+        reason=payload.reason.strip() if payload.reason else None,
+        source="web",
+        status="pending",
+    )
+    db.add(request_row)
+    db.commit()
+    db.refresh(request_row)
+
+    if settings.email_enabled and settings.contact_email:
+        try:
+            send_email(
+                settings,
+                to_email=settings.contact_email,
+                subject=f"{settings.app_name} account deletion request",
+                body=(
+                    "A user submitted an external account deletion request.\n\n"
+                    f"Email: {request_row.email}\n"
+                    f"Reason: {request_row.reason or 'Not provided'}\n"
+                    f"Request ID: {request_row.id}"
+                ),
+            )
+        except Exception as exc:
+            logger.warning("Account deletion request email notification failed: %s", exc)
+
+    return MessageResponse(
+        message=(
+            "Your deletion request has been recorded. "
+            "If this email matches an account in Stockfolio NG, the request can now be processed."
+        )
+    )
+
+
 def _new_email_verification_token() -> str:
     return secrets.token_urlsafe(32)
 
@@ -292,6 +362,21 @@ def change_password(
     return MessageResponse(message="Password updated.")
 
 
+@app.post("/me/delete-account", response_model=MessageResponse)
+def delete_account(
+    payload: AccountDeleteRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> MessageResponse:
+    if not verify_password(payload.password, user.password_hash):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+
+    email = user.email
+    db.delete(user)
+    db.commit()
+    return MessageResponse(message=f"Account {email} and associated portfolio data were deleted.")
+
+
 @app.post("/me/email-verification", response_model=MessageResponse)
 def request_email_verification(
     db: Session = Depends(get_db),
@@ -375,7 +460,7 @@ def get_market_status(db: Session = Depends(get_db), _: User = Depends(get_curre
 @app.get("/market/snapshot", response_model=MarketSnapshotOut)
 def get_market_snapshot(_: User = Depends(get_current_user)) -> dict:
     try:
-        return fetch_market_snapshot_from_ngx()
+        return fetch_market_snapshot_cached()
     except NgxFetchError as exc:
         logger.warning("Market snapshot fetch failed: %s", exc)
         raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -416,7 +501,7 @@ def get_stock_company_news(
     if not ngx_id:
         return []
     try:
-        return fetch_company_news_from_ngx(ngx_id)[:limit]
+        return fetch_company_news_cached(ngx_id)[:limit]
     except NgxFetchError as exc:
         logger.warning("Company news fetch failed for %s: %s", stock.symbol, exc)
         raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -445,6 +530,48 @@ def get_stock_history(
         db.commit()
         rows = stock_history_query(db, symbol, since)
     return rows
+
+
+@app.get("/stocks/{symbol}/detail", response_model=StockDetailOut)
+def get_stock_detail(
+    symbol: str,
+    months: int = Query(default=12, ge=1, le=120),
+    news_limit: int = Query(default=6, ge=1, le=20),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> dict:
+    stock = db.get(Stock, symbol.strip().upper())
+    if stock is None:
+        raise HTTPException(status_code=404, detail="Stock not found")
+
+    ngx_id = ensure_stock_ngx_id(db, stock)
+    since = date.today() - relativedelta(months=months)
+    rows = stock_history_query(db, symbol, since)
+    if ngx_id and (not rows or any(row.open_price is None for row in rows) or stock_history_is_stale(rows)):
+        upsert_stock_history(db, stock.symbol, ngx_id)
+        db.commit()
+        db.refresh(stock)
+        rows = stock_history_query(db, symbol, since)
+
+    market_snapshot = None
+    try:
+        market_snapshot = fetch_market_snapshot_cached()
+    except NgxFetchError as exc:
+        logger.warning("Market snapshot fetch failed for %s detail: %s", stock.symbol, exc)
+
+    news: list[dict] = []
+    if ngx_id:
+        try:
+            news = fetch_company_news_cached(ngx_id)[:news_limit]
+        except NgxFetchError as exc:
+            logger.warning("Company news fetch failed for %s detail: %s", stock.symbol, exc)
+
+    return {
+        "stock": stock,
+        "history": rows,
+        "market_snapshot": market_snapshot,
+        "news": news,
+    }
 
 
 @app.post("/admin/sync/stocks", response_model=SyncResult)
@@ -488,6 +615,19 @@ def get_email_status(_: User = Depends(get_current_superuser)) -> dict:
         "has_smtp_from_email": bool(settings.smtp_from_email),
         "from_email": settings.from_email,
     }
+
+
+@app.get("/admin/account-deletion-requests", response_model=list[AccountDeletionRequestOut])
+def get_account_deletion_requests(
+    limit: int = Query(default=50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_superuser),
+) -> list[AccountDeletionRequest]:
+    return db.scalars(
+        select(AccountDeletionRequest)
+        .order_by(desc(AccountDeletionRequest.created_at), desc(AccountDeletionRequest.id))
+        .limit(limit)
+    ).all()
 
 
 @app.get("/portfolio/holdings", response_model=list[HoldingOut])
