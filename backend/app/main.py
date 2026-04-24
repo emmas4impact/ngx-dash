@@ -97,6 +97,20 @@ def stock_history_is_stale(rows: list) -> bool:
     return datetime.now(timezone.utc) - latest_updated_at > refresh_after
 
 
+def intraday_leader_payload(stock: Stock) -> dict | None:
+    current_price = float(stock.last_price) if stock.last_price is not None else None
+    opening_price = float(stock.open_price) if stock.open_price is not None else None
+    if current_price is None or opening_price is None or opening_price <= 0:
+        return None
+
+    change = current_price - opening_price
+    percent_change = (change / opening_price) * 100
+    payload = StockOut.model_validate(stock).model_dump()
+    payload["change"] = change
+    payload["percent_change"] = percent_change
+    return payload
+
+
 def ensure_stock_ngx_id(db: Session, stock: Stock) -> str | None:
     if stock.ngx_id:
         return stock.ngx_id
@@ -514,21 +528,18 @@ def get_market_leaders(
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ) -> dict:
-    mover_query = (
+    stocks = db.scalars(
         select(Stock)
-        .where(Stock.percent_change.is_not(None))
-        .order_by(Stock.percent_change.desc(), Stock.symbol)
-        .limit(limit)
-    )
-    loser_query = (
-        select(Stock)
-        .where(Stock.percent_change.is_not(None))
-        .order_by(Stock.percent_change.asc(), Stock.symbol)
-        .limit(limit)
-    )
+        .where(Stock.last_price.is_not(None), Stock.open_price.is_not(None))
+        .order_by(Stock.symbol)
+    ).all()
+    ranked = [payload for stock in stocks if (payload := intraday_leader_payload(stock)) is not None]
+    ranked.sort(key=lambda item: (item["percent_change"], item["symbol"]), reverse=True)
+    top_movers = ranked[:limit]
+    top_losers = sorted(ranked, key=lambda item: (item["percent_change"], item["symbol"]))[:limit]
     return {
-        "top_movers": list(db.scalars(mover_query).all()),
-        "top_losers": list(db.scalars(loser_query).all()),
+        "top_movers": top_movers,
+        "top_losers": top_losers,
     }
 
 
