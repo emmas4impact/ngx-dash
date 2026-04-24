@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -20,12 +21,109 @@ final apiBaseUrl = normalizeApiBaseUrl(configuredApiBaseUrl());
 const _themeModePreferenceKey = 'theme_mode';
 const _webSessionDeadlineKey = 'web_session_deadline_ms';
 const _webSessionExtendedKey = 'web_session_extended';
+const _seedColor = Color(0xFF0E7C66);
+const _darkScaffold = Color(0xFF0B1215);
+const _darkSurface = Color(0xFF101A1E);
+const _darkSurfaceAlt = Color(0xFF142126);
+const _lightScaffold = Color(0xFFF4F7F8);
 
 String stockLogoUrl(String symbol) =>
     '$apiBaseUrl/public/stocks/${Uri.encodeComponent(symbol)}/logo';
 
 String stockLogoAssetPath(String symbol) =>
     'assets/company_logos/${symbol.trim().toUpperCase()}.png';
+
+class MarketStatusPalette {
+  const MarketStatusPalette({
+    required this.base,
+    required this.container,
+    required this.content,
+    required this.icon,
+  });
+
+  final Color base;
+  final Color container;
+  final Color content;
+  final IconData icon;
+}
+
+MarketStatusPalette marketStatusPalette(
+  ThemeData theme,
+  String status, {
+  bool stale = false,
+}) {
+  final normalized = status.toUpperCase().replaceAll('-', '_');
+  if (stale) {
+    return const MarketStatusPalette(
+      base: Color(0xFFD97706),
+      container: Color(0xFFFEF3C7),
+      content: Color(0xFF92400E),
+      icon: Icons.warning_amber_rounded,
+    );
+  }
+  if (normalized.contains('ENDOFDAY') || normalized.contains('END_OF_DAY')) {
+    return theme.brightness == Brightness.dark
+        ? const MarketStatusPalette(
+            base: Color(0xFFF87171),
+            container: Color(0xFF32161A),
+            content: Color(0xFFFECACA),
+            icon: Icons.lock_clock_outlined,
+          )
+        : const MarketStatusPalette(
+            base: Color(0xFFDC2626),
+            container: Color(0xFFFEE2E2),
+            content: Color(0xFF991B1B),
+            icon: Icons.lock_clock_outlined,
+          );
+  }
+  if (normalized.contains('START_INDEX')) {
+    return theme.brightness == Brightness.dark
+        ? const MarketStatusPalette(
+            base: Color(0xFF34D399),
+            container: Color(0xFF0F2A24),
+            content: Color(0xFFD1FAE5),
+            icon: Icons.trending_up_rounded,
+          )
+        : const MarketStatusPalette(
+            base: Color(0xFF059669),
+            container: Color(0xFFD1FAE5),
+            content: Color(0xFF065F46),
+            icon: Icons.trending_up_rounded,
+          );
+  }
+  if (normalized.contains('PRE_OPEN')) {
+    return theme.brightness == Brightness.dark
+        ? const MarketStatusPalette(
+            base: Color(0xFFA3E635),
+            container: Color(0xFF233012),
+            content: Color(0xFFECFCCB),
+            icon: Icons.schedule_rounded,
+          )
+        : const MarketStatusPalette(
+            base: Color(0xFF65A30D),
+            container: Color(0xFFECFCCB),
+            content: Color(0xFF3F6212),
+            icon: Icons.schedule_rounded,
+          );
+  }
+  return theme.brightness == Brightness.dark
+      ? const MarketStatusPalette(
+          base: Color(0xFF60A5FA),
+          container: Color(0xFF172554),
+          content: Color(0xFFDBEAFE),
+          icon: Icons.insights_outlined,
+        )
+      : const MarketStatusPalette(
+          base: Color(0xFF2563EB),
+          container: Color(0xFFDBEAFE),
+          content: Color(0xFF1E3A8A),
+          icon: Icons.insights_outlined,
+        );
+}
+
+Color chartGridColor(ThemeData theme) => theme.brightness == Brightness.dark
+    ? Colors.white.withValues(alpha: 0.09)
+    : theme.colorScheme.outlineVariant.withValues(alpha: 0.55);
 
 String normalizeApiBaseUrl(String value) {
   final trimmed = value.trim().replaceAll(RegExp(r'/+$'), '');
@@ -116,10 +214,61 @@ class _NgxPortfolioAppState extends State<NgxPortfolioApp> {
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF0E7C66),
+          seedColor: _seedColor,
           brightness: Brightness.light,
         ),
-        scaffoldBackgroundColor: const Color(0xFFF7F8FA),
+        scaffoldBackgroundColor: _lightScaffold,
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Color(0xFFE7F2EE),
+          foregroundColor: Color(0xFF11201C),
+          elevation: 0,
+        ),
+        navigationBarTheme: NavigationBarThemeData(
+          backgroundColor: Colors.white,
+          indicatorColor: const Color(0xFFCFEADF),
+          labelTextStyle: WidgetStateProperty.resolveWith((states) {
+            final selected = states.contains(WidgetState.selected);
+            return TextStyle(
+              color: selected
+                  ? const Color(0xFF0E7C66)
+                  : const Color(0xFF4B635C),
+              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+            );
+          }),
+        ),
+        navigationRailTheme: const NavigationRailThemeData(
+          backgroundColor: Color(0xFFEFF6F3),
+          indicatorColor: Color(0xFFCFEADF),
+          selectedIconTheme: IconThemeData(color: Color(0xFF0E7C66)),
+          selectedLabelTextStyle: TextStyle(
+            color: Color(0xFF0E7C66),
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        inputDecorationTheme: InputDecorationTheme(
+          filled: true,
+          fillColor: Colors.white,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(18),
+            borderSide: BorderSide.none,
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(18),
+            borderSide: const BorderSide(color: Color(0xFFD7E2DE)),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(18),
+            borderSide: const BorderSide(color: _seedColor, width: 1.5),
+          ),
+          errorBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(18),
+            borderSide: const BorderSide(color: Color(0xFFDC2626)),
+          ),
+          focusedErrorBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(18),
+            borderSide: const BorderSide(color: Color(0xFFDC2626), width: 1.5),
+          ),
+        ),
         cardTheme: const CardThemeData(
           elevation: 0,
           shape: RoundedRectangleBorder(
@@ -131,15 +280,69 @@ class _NgxPortfolioAppState extends State<NgxPortfolioApp> {
       darkTheme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF0E7C66),
+          seedColor: _seedColor,
           brightness: Brightness.dark,
         ),
-        scaffoldBackgroundColor: const Color(0xFF0F1715),
+        scaffoldBackgroundColor: _darkScaffold,
+        canvasColor: _darkScaffold,
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Color(0xFF121C20),
+          foregroundColor: Color(0xFFE6F4EF),
+          elevation: 0,
+        ),
+        navigationBarTheme: NavigationBarThemeData(
+          backgroundColor: const Color(0xFF111B1F),
+          indicatorColor: const Color(0xFF173D35),
+          labelTextStyle: WidgetStateProperty.resolveWith((states) {
+            final selected = states.contains(WidgetState.selected);
+            return TextStyle(
+              color: selected
+                  ? const Color(0xFF8CE2C3)
+                  : const Color(0xFF92AAA4),
+              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+            );
+          }),
+        ),
+        navigationRailTheme: const NavigationRailThemeData(
+          backgroundColor: Color(0xFF10181C),
+          indicatorColor: Color(0xFF173D35),
+          selectedIconTheme: IconThemeData(color: Color(0xFF8CE2C3)),
+          unselectedIconTheme: IconThemeData(color: Color(0xFF9DB1AB)),
+          selectedLabelTextStyle: TextStyle(
+            color: Color(0xFF8CE2C3),
+            fontWeight: FontWeight.w700,
+          ),
+          unselectedLabelTextStyle: TextStyle(color: Color(0xFF9DB1AB)),
+        ),
+        inputDecorationTheme: InputDecorationTheme(
+          filled: true,
+          fillColor: _darkSurfaceAlt,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(18),
+            borderSide: BorderSide.none,
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(18),
+            borderSide: const BorderSide(color: Color(0xFF26363C)),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(18),
+            borderSide: const BorderSide(color: Color(0xFF58C1A0), width: 1.5),
+          ),
+          errorBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(18),
+            borderSide: const BorderSide(color: Color(0xFFF87171)),
+          ),
+          focusedErrorBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(18),
+            borderSide: const BorderSide(color: Color(0xFFF87171), width: 1.5),
+          ),
+        ),
         cardTheme: const CardThemeData(
           elevation: 0,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.all(Radius.circular(8)),
-            side: BorderSide(color: Color(0xFF23403A)),
+            side: BorderSide(color: Color(0xFF203138)),
           ),
         ),
       ),
@@ -1517,14 +1720,29 @@ class _AuthHeroPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = theme.colorScheme;
+    final muted = theme.textTheme.bodyMedium?.copyWith(
+      color: scheme.onSurfaceVariant,
+      height: 1.4,
+    );
     return Container(
       decoration: BoxDecoration(
-        color: scheme.surface,
-        borderRadius: BorderRadius.circular(8),
+        color: theme.brightness == Brightness.dark
+            ? _darkSurface
+            : Colors.white,
+        borderRadius: BorderRadius.circular(24),
         border: Border.all(color: scheme.outlineVariant),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(
+              alpha: theme.brightness == Brightness.dark ? 0.16 : 0.04,
+            ),
+            blurRadius: 28,
+            offset: const Offset(0, 14),
+          ),
+        ],
       ),
       child: Padding(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(28),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -1547,24 +1765,28 @@ class _AuthHeroPanel extends StatelessWidget {
                       Text('Stockfolio NG', style: theme.textTheme.titleLarge),
                       Text(
                         'Track Nigerian equities with live market context.',
-                        style: theme.textTheme.bodySmall,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
                       ),
                     ],
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 28),
+            const SizedBox(height: 32),
             Text(
               registerMode ? 'Create your account' : 'Welcome back',
-              style: theme.textTheme.headlineSmall,
+              style: theme.textTheme.headlineSmall?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
             ),
             const SizedBox(height: 8),
             Text(
               registerMode
                   ? 'Build a personal portfolio, watch movers, and follow your holdings with charts.'
                   : 'Sign in to your dashboard, portfolio alerts, charts, and market overview.',
-              style: theme.textTheme.bodyMedium,
+              style: muted,
             ),
             const SizedBox(height: 20),
             Wrap(
@@ -1716,6 +1938,23 @@ class _LandingMarketView extends StatelessWidget {
     final movers = leaders?.topMovers ?? const <Stock>[];
     final losers = leaders?.topLosers ?? const <Stock>[];
     final chartStocks = [...movers.take(3), ...losers.take(2)];
+    final status = landing?.status;
+    final statusPalette = marketStatusPalette(
+      theme,
+      status?.status ?? 'UNKNOWN',
+      stale: status?.stale ?? false,
+    );
+    final heroBackground = theme.brightness == Brightness.dark
+        ? const LinearGradient(
+            colors: [Color(0xFF132328), Color(0xFF0D181C)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          )
+        : const LinearGradient(
+            colors: [Color(0xFF10352F), Color(0xFF16443C)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1723,8 +1962,15 @@ class _LandingMarketView extends StatelessWidget {
         Container(
           padding: const EdgeInsets.all(22),
           decoration: BoxDecoration(
-            color: const Color(0xFF10352F),
-            borderRadius: BorderRadius.circular(8),
+            gradient: heroBackground,
+            borderRadius: BorderRadius.circular(28),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.14),
+                blurRadius: 32,
+                offset: const Offset(0, 18),
+              ),
+            ],
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1740,25 +1986,50 @@ class _LandingMarketView extends StatelessWidget {
                       vertical: 8,
                     ),
                     decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.1),
+                      color: statusPalette.container.withValues(
+                        alpha: theme.brightness == Brightness.dark
+                            ? 0.82
+                            : 0.95,
+                      ),
                       borderRadius: BorderRadius.circular(999),
                     ),
-                    child: Text(
-                      landing == null
-                          ? 'Market pulse loading'
-                          : 'Market status: ${landing!.status.status}',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w600,
-                      ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          statusPalette.icon,
+                          size: 18,
+                          color: statusPalette.content,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          landing == null
+                              ? 'Market pulse loading'
+                              : 'Market status: ${landing!.status.status}',
+                          style: TextStyle(
+                            color: statusPalette.content,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                   if (landing?.status.message != null &&
                       landing!.status.message!.isNotEmpty)
-                    Text(
-                      landing!.status.message!,
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.78),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        landing!.status.message!,
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.82),
+                        ),
                       ),
                     ),
                 ],
@@ -1820,8 +2091,10 @@ class _LandingMarketView extends StatelessWidget {
               constraints: const BoxConstraints(minHeight: 340),
               padding: const EdgeInsets.all(18),
               decoration: BoxDecoration(
-                color: scheme.surface,
-                borderRadius: BorderRadius.circular(8),
+                color: theme.brightness == Brightness.dark
+                    ? _darkSurface
+                    : Colors.white,
+                borderRadius: BorderRadius.circular(24),
                 border: Border.all(color: scheme.outlineVariant),
               ),
               child: _LandingPulseChart(stocks: chartStocks),
@@ -1955,6 +2228,7 @@ class _LandingPulseChart extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     if (stocks.isEmpty) {
       return const EmptyState(
         icon: Icons.multiline_chart,
@@ -2025,11 +2299,18 @@ class _LandingPulseChart extends StatelessWidget {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Market pulse', style: Theme.of(context).textTheme.titleLarge),
+            Text(
+              'Market pulse',
+              style: theme.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
             const SizedBox(height: 6),
             Text(
               'A live-style view built from today’s opening price versus current market price.',
-              style: Theme.of(context).textTheme.bodyMedium,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
             ),
             const SizedBox(height: 16),
             SizedBox(
@@ -2045,7 +2326,7 @@ class _LandingPulseChart extends StatelessWidget {
                     show: true,
                     drawVerticalLine: false,
                     getDrawingHorizontalLine: (_) =>
-                        FlLine(color: const Color(0xFFE2E8E6), strokeWidth: 1),
+                        FlLine(color: chartGridColor(theme), strokeWidth: 1),
                   ),
                   titlesData: FlTitlesData(
                     topTitles: const AxisTitles(
@@ -2066,7 +2347,12 @@ class _LandingPulseChart extends StatelessWidget {
                           }
                           return Padding(
                             padding: const EdgeInsets.only(top: 8),
-                            child: Text(labels[index]!),
+                            child: Text(
+                              labels[index]!,
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
+                            ),
                           );
                         },
                       ),
@@ -2074,13 +2360,17 @@ class _LandingPulseChart extends StatelessWidget {
                     leftTitles: AxisTitles(
                       sideTitles: SideTitles(
                         showTitles: true,
-                        reservedSize: compact ? 50 : 60,
+                        reservedSize: compact ? 44 : 52,
+                        interval: max(1.0, (maxY - minY) / 3),
                         getTitlesWidget: (value, meta) => Padding(
                           padding: const EdgeInsets.only(right: 8),
                           child: Text(
                             axisLabel(value),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
                           ),
                         ),
                       ),
@@ -2112,7 +2402,7 @@ class _LandingPulseChart extends StatelessWidget {
                     ),
                     decoration: BoxDecoration(
                       color: line.color.withValues(alpha: 0.08),
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(16),
                       border: Border.all(
                         color: line.color.withValues(alpha: 0.18),
                       ),
@@ -2175,14 +2465,17 @@ class _LandingMetricTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     return SizedBox(
       width: 220,
       child: Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: scheme.surface,
-          borderRadius: BorderRadius.circular(8),
+          color: theme.brightness == Brightness.dark
+              ? _darkSurface
+              : Colors.white,
+          borderRadius: BorderRadius.circular(20),
           border: Border.all(color: scheme.outlineVariant),
         ),
         child: Row(
@@ -2196,13 +2489,20 @@ class _LandingMetricTile extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(label, style: Theme.of(context).textTheme.labelMedium),
+                  Text(
+                    label,
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
                   const SizedBox(height: 4),
                   Text(
                     value,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.titleMedium,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ],
               ),
@@ -3141,6 +3441,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return RefreshIndicator(
       onRefresh: () async => refresh(),
       child: FutureBuilder<List<Holding>>(
@@ -3156,31 +3457,79 @@ class _HomeScreenState extends State<HomeScreen> {
             (sum, item) => sum + item.totalCost,
           );
           final profitLoss = totalValue - totalCost;
+          final profitPercent = totalCost == 0
+              ? 0.0
+              : (profitLoss / totalCost) * 100;
+          Holding? bestHolding;
+          Holding? weakestHolding;
+          for (final holding in holdings) {
+            final change = holding.profitLossPercent ?? 0;
+            if (bestHolding == null ||
+                change >
+                    (bestHolding.profitLossPercent ??
+                        double.negativeInfinity)) {
+              bestHolding = holding;
+            }
+            if (weakestHolding == null ||
+                change <
+                    (weakestHolding.profitLossPercent ?? double.infinity)) {
+              weakestHolding = holding;
+            }
+          }
 
           return ListView(
             padding: const EdgeInsets.all(16),
             children: [
+              _PortfolioOverviewHero(
+                totalValue: totalValue,
+                profitLoss: profitLoss,
+                profitPercent: profitPercent,
+                holdingCount: holdings.length,
+                bestHolding: bestHolding,
+                weakestHolding: weakestHolding,
+              ),
+              const SizedBox(height: 18),
+              Text(
+                'Your dashboard',
+                style: theme.textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'A quick read on your portfolio health and the market leaders shaping today.',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 16),
               Wrap(
                 spacing: 12,
                 runSpacing: 12,
                 children: [
                   MetricCard(
-                    label: 'Portfolio value',
-                    value: moneyFormat.format(totalValue),
+                    label: 'Unrealized return',
+                    value: '${profitPercent.toStringAsFixed(2)}%',
                     icon: Icons.payments,
-                  ),
-                  MetricCard(
-                    label: 'Holdings',
-                    value: holdings.length.toString(),
-                    icon: Icons.pie_chart_outline,
-                  ),
-                  MetricCard(
-                    label: 'Profit / loss',
-                    value: moneyFormat.format(profitLoss),
-                    icon: profitLoss >= 0
-                        ? Icons.trending_up
-                        : Icons.trending_down,
                     positive: profitLoss >= 0,
+                  ),
+                  MetricCard(
+                    label: 'Best holding',
+                    value: bestHolding == null
+                        ? '-'
+                        : '${bestHolding.symbol} ${(bestHolding.profitLossPercent ?? 0).toStringAsFixed(2)}%',
+                    icon: Icons.emoji_events_outlined,
+                    positive: (bestHolding?.profitLossPercent ?? 0) >= 0,
+                  ),
+                  MetricCard(
+                    label: 'Needs attention',
+                    value: weakestHolding == null
+                        ? '-'
+                        : '${weakestHolding.symbol} ${(weakestHolding.profitLossPercent ?? 0).toStringAsFixed(2)}%',
+                    icon: profitLoss >= 0
+                        ? Icons.monitor_heart_outlined
+                        : Icons.warning_amber_rounded,
+                    positive: false,
                   ),
                 ],
               ),
@@ -3324,21 +3673,40 @@ class _AccountScreenState extends State<AccountScreen> {
   Future<void> pickProfileImage() async {
     setState(() => pickingProfileImage = true);
     try {
-      final file = await imagePicker.pickImage(
-        source: ImageSource.gallery,
-        imageQuality: 72,
-        maxWidth: 720,
-        maxHeight: 720,
-      );
-      if (file == null) return;
-      final bytes = await file.readAsBytes();
-      if (bytes.isEmpty) return;
-      final mimeType = (file.mimeType != null && file.mimeType!.isNotEmpty)
-          ? file.mimeType!
-          : 'image/jpeg';
+      Uint8List? bytes;
+      String mimeType = 'image/jpeg';
+      if (kIsWeb) {
+        final result = await FilePicker.platform.pickFiles(
+          type: FileType.image,
+          withData: true,
+        );
+        final file = result?.files.singleOrNull;
+        bytes = file?.bytes;
+        final extension = file?.extension?.toLowerCase();
+        mimeType = switch (extension) {
+          'png' => 'image/png',
+          'gif' => 'image/gif',
+          'webp' => 'image/webp',
+          _ => 'image/jpeg',
+        };
+      } else {
+        final file = await imagePicker.pickImage(
+          source: ImageSource.gallery,
+          imageQuality: 72,
+          maxWidth: 720,
+          maxHeight: 720,
+        );
+        if (file != null) {
+          bytes = await file.readAsBytes();
+          if (file.mimeType != null && file.mimeType!.isNotEmpty) {
+            mimeType = file.mimeType!;
+          }
+        }
+      }
+      if (bytes == null || bytes.isEmpty) return;
       if (!mounted) return;
       setState(() {
-        profileImageUrl = 'data:$mimeType;base64,${base64Encode(bytes)}';
+        profileImageUrl = 'data:$mimeType;base64,${base64Encode(bytes!)}';
       });
     } catch (error) {
       if (mounted) showError(context, error.toString());
@@ -5030,41 +5398,32 @@ class MarketStatusBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final normalized = status.status.toUpperCase().replaceAll('-', '_');
-    final isPreOpen = normalized.contains('PRE_OPEN');
-    final isStartIndex = normalized.contains('START_INDEX');
-    final isEndOfDay =
-        normalized.contains('ENDOFDAY') || normalized.contains('END_OF_DAY');
-    final color = status.stale
-        ? Colors.orange
-        : isEndOfDay
-        ? Colors.red
-        : isStartIndex
-        ? Colors.green
-        : isPreOpen
-        ? Colors.lightGreen
-        : Colors.blueGrey;
-    final icon = status.stale
-        ? Icons.warning_amber
-        : isEndOfDay
-        ? Icons.lock_clock
-        : isStartIndex
-        ? Icons.trending_up
-        : isPreOpen
-        ? Icons.schedule
-        : Icons.info_outline;
+    final theme = Theme.of(context);
+    final palette = marketStatusPalette(
+      theme,
+      status.status,
+      stale: status.stale,
+    );
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: color.shade50,
-        border: Border.all(color: color.shade200),
-        borderRadius: BorderRadius.circular(8),
+        color: palette.container,
+        border: Border.all(color: palette.base.withValues(alpha: 0.24)),
+        borderRadius: BorderRadius.circular(18),
       ),
       child: Row(
         children: [
-          Icon(icon, color: color.shade800),
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: palette.base.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Icon(palette.icon, color: palette.base),
+          ),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
@@ -5072,14 +5431,25 @@ class MarketStatusBanner extends StatelessWidget {
               children: [
                 Text(
                   'Market status: ${status.status}',
-                  style: const TextStyle(fontWeight: FontWeight.w700),
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: palette.content,
+                  ),
                 ),
                 if (status.updatedAt != null)
                   Text(
                     'Updated ${DateFormat.yMd().add_jms().format(status.updatedAt!.toLocal())}',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: palette.content.withValues(alpha: 0.88),
+                    ),
                   ),
                 if (status.message != null && status.message!.isNotEmpty)
-                  Text(status.message!),
+                  Text(
+                    status.message!,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: palette.content.withValues(alpha: 0.88),
+                    ),
+                  ),
               ],
             ),
           ),
@@ -5539,6 +5909,194 @@ class ProfileAvatar extends StatelessWidget {
   }
 }
 
+class _PortfolioOverviewHero extends StatelessWidget {
+  const _PortfolioOverviewHero({
+    required this.totalValue,
+    required this.profitLoss,
+    required this.profitPercent,
+    required this.holdingCount,
+    required this.bestHolding,
+    required this.weakestHolding,
+  });
+
+  final double totalValue;
+  final double profitLoss;
+  final double profitPercent;
+  final int holdingCount;
+  final Holding? bestHolding;
+  final Holding? weakestHolding;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final positive = profitLoss >= 0;
+    final accent = positive
+        ? (theme.brightness == Brightness.dark
+              ? const Color(0xFF58D3A7)
+              : const Color(0xFF0E7C66))
+        : (theme.brightness == Brightness.dark
+              ? const Color(0xFFFCA5A5)
+              : const Color(0xFFB91C1C));
+    final background = theme.brightness == Brightness.dark
+        ? const LinearGradient(
+            colors: [Color(0xFF112127), Color(0xFF0B1519)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          )
+        : const LinearGradient(
+            colors: [Color(0xFFF4FBF8), Color(0xFFE9F4F0)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          );
+    return Container(
+      padding: const EdgeInsets.all(22),
+      decoration: BoxDecoration(
+        gradient: background,
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: scheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Icon(
+                  Icons.account_balance_wallet_outlined,
+                  color: accent,
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Portfolio snapshot',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '$holdingCount holdings across your active watchlist.',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Chip(
+                label: Text(
+                  '${profitPercent.toStringAsFixed(2)}%',
+                  style: TextStyle(color: accent, fontWeight: FontWeight.w700),
+                ),
+                backgroundColor: accent.withValues(alpha: 0.12),
+                side: BorderSide(color: accent.withValues(alpha: 0.2)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 22),
+          Text(
+            moneyFormat.format(totalValue),
+            style: theme.textTheme.headlineMedium?.copyWith(
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '${positive ? '+' : '-'}${moneyFormat.format(profitLoss.abs())} unrealized ${positive ? 'gain' : 'loss'}',
+            style: theme.textTheme.titleMedium?.copyWith(
+              color: accent,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 18),
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: [
+              _HeroInfoPill(
+                icon: Icons.rocket_launch_outlined,
+                label: 'Best today',
+                value: bestHolding == null
+                    ? '-'
+                    : '${bestHolding!.symbol} ${(bestHolding!.profitLossPercent ?? 0).toStringAsFixed(2)}%',
+              ),
+              _HeroInfoPill(
+                icon: Icons.remove_red_eye_outlined,
+                label: 'Watch closely',
+                value: weakestHolding == null
+                    ? '-'
+                    : '${weakestHolding!.symbol} ${(weakestHolding!.profitLossPercent ?? 0).toStringAsFixed(2)}%',
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HeroInfoPill extends StatelessWidget {
+  const _HeroInfoPill({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      constraints: const BoxConstraints(minWidth: 190),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface.withValues(
+          alpha: theme.brightness == Brightness.dark ? 0.35 : 0.75,
+        ),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 18, color: theme.colorScheme.primary),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label, style: theme.textTheme.labelMedium),
+                Text(
+                  value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class MetricCard extends StatelessWidget {
   const MetricCard({
     super.key,
@@ -5555,9 +6113,10 @@ class MetricCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final color = positive == null
-        ? Theme.of(context).colorScheme.primary
-        : (positive! ? Colors.green : Colors.red);
+        ? theme.colorScheme.primary
+        : (positive! ? const Color(0xFF0E9F6E) : const Color(0xFFDC2626));
     return SizedBox(
       width: 260,
       child: Card(
@@ -5574,14 +6133,21 @@ class MetricCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(label, style: Theme.of(context).textTheme.labelMedium),
+                    Text(
+                      label,
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
                     const SizedBox(height: 4),
                     FittedBox(
                       fit: BoxFit.scaleDown,
                       alignment: Alignment.centerLeft,
                       child: Text(
                         value,
-                        style: Theme.of(context).textTheme.titleLarge,
+                        style: theme.textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                     ),
                   ],
@@ -5613,7 +6179,8 @@ class MarketLeaderPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = positive ? Colors.green.shade700 : Colors.red.shade700;
+    final theme = Theme.of(context);
+    final color = positive ? const Color(0xFF0E9F6E) : const Color(0xFFDC2626);
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -5624,7 +6191,12 @@ class MarketLeaderPanel extends StatelessWidget {
               children: [
                 Icon(icon, color: color),
                 const SizedBox(width: 10),
-                Text(title, style: Theme.of(context).textTheme.titleMedium),
+                Text(
+                  title,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
               ],
             ),
             const SizedBox(height: 12),
@@ -5632,30 +6204,65 @@ class MarketLeaderPanel extends StatelessWidget {
               const Text('No market leaders available yet.')
             else
               ...stocks.map(
-                (stock) => ListTile(
+                (stock) => InkWell(
                   onTap: onStockTap == null ? null : () => onStockTap!(stock),
-                  contentPadding: EdgeInsets.zero,
-                  dense: true,
-                  leading: CompanyLogo(symbol: stock.symbol, size: 34),
-                  title: Text(stock.symbol),
-                  subtitle: Text(stock.name ?? stock.symbol),
-                  trailing: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Text(
-                        stock.lastPrice == null
-                            ? 'No price'
-                            : moneyFormat.format(stock.lastPrice),
-                      ),
-                      Text(
-                        '${stock.percentChange?.toStringAsFixed(2) ?? '0.00'}%',
-                        style: TextStyle(
-                          color: color,
-                          fontWeight: FontWeight.w700,
+                  borderRadius: BorderRadius.circular(18),
+                  child: Container(
+                    margin: const EdgeInsets.only(bottom: 10),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: color.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(color: color.withValues(alpha: 0.18)),
+                    ),
+                    child: Row(
+                      children: [
+                        CompanyLogo(symbol: stock.symbol, size: 38),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                stock.symbol,
+                                style: theme.textTheme.titleSmall?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              Text(
+                                stock.name ?? stock.symbol,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: theme.colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                    ],
+                        const SizedBox(width: 12),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Text(
+                              stock.lastPrice == null
+                                  ? 'No price'
+                                  : moneyFormat.format(stock.lastPrice),
+                              style: theme.textTheme.titleSmall?.copyWith(
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            Text(
+                              '${stock.percentChange?.toStringAsFixed(2) ?? '0.00'}%',
+                              style: TextStyle(
+                                color: color,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -5833,6 +6440,7 @@ class PriceChart extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final values = [
       ...points.map((point) => point.open),
       ...points.map((point) => point.close),
@@ -5867,7 +6475,12 @@ class PriceChart extends StatelessWidget {
             LineChartData(
               minY: minPrice - yPadding,
               maxY: maxPrice + yPadding,
-              gridData: const FlGridData(show: true, drawVerticalLine: false),
+              gridData: FlGridData(
+                show: true,
+                drawVerticalLine: false,
+                getDrawingHorizontalLine: (_) =>
+                    FlLine(color: chartGridColor(theme), strokeWidth: 1),
+              ),
               borderData: FlBorderData(show: false),
               titlesData: FlTitlesData(
                 topTitles: const AxisTitles(
@@ -5880,8 +6493,12 @@ class PriceChart extends StatelessWidget {
                   sideTitles: SideTitles(
                     showTitles: true,
                     reservedSize: 56,
-                    getTitlesWidget: (value, meta) =>
-                        Text(compactFormat.format(value)),
+                    getTitlesWidget: (value, meta) => Text(
+                      compactFormat.format(value),
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
                   ),
                 ),
                 bottomTitles: AxisTitles(
@@ -5898,6 +6515,9 @@ class PriceChart extends StatelessWidget {
                         padding: const EdgeInsets.only(top: 8),
                         child: Text(
                           DateFormat.MMM().format(points[index].date),
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
                         ),
                       );
                     },
