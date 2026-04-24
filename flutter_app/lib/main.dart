@@ -6,6 +6,7 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -643,6 +644,23 @@ String? blankToNull(String value) {
 String stockPickerLabel(Stock stock) =>
     blankToNull(stock.name ?? '') ?? stock.symbol;
 
+ImageProvider<Object>? profileImageProvider(String? value) {
+  final trimmed = value?.trim();
+  if (trimmed == null || trimmed.isEmpty) return null;
+  if (trimmed.startsWith('data:')) {
+    try {
+      final data = UriData.parse(trimmed);
+      return MemoryImage(data.contentAsBytes());
+    } catch (_) {
+      return null;
+    }
+  }
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+    return NetworkImage(trimmed);
+  }
+  return null;
+}
+
 extension StringFallback on String {
   String withFallback(String fallback) => isEmpty ? fallback : this;
 }
@@ -817,6 +835,7 @@ class AppUser {
     required this.id,
     required this.email,
     this.fullName,
+    this.profileImageUrl,
     this.phone,
     this.address,
     this.city,
@@ -830,6 +849,7 @@ class AppUser {
   final int id;
   final String email;
   final String? fullName;
+  final String? profileImageUrl;
   final String? phone;
   final String? address;
   final String? city;
@@ -842,11 +862,21 @@ class AppUser {
   String get displayName =>
       fullName == null || fullName!.trim().isEmpty ? email : fullName!.trim();
 
+  String get firstName {
+    final source = fullName?.trim();
+    if (source != null && source.isNotEmpty) {
+      return source.split(RegExp(r'\s+')).first;
+    }
+    final emailLocal = email.split('@').first.trim();
+    return emailLocal.isEmpty ? 'Investor' : emailLocal;
+  }
+
   factory AppUser.fromJson(Map<String, dynamic> json) {
     return AppUser(
       id: (json['id'] as num?)?.toInt() ?? 0,
       email: json['email']?.toString() ?? '',
       fullName: json['full_name'] as String?,
+      profileImageUrl: json['profile_image_url'] as String?,
       phone: json['phone'] as String?,
       address: json['address'] as String?,
       city: json['city'] as String?,
@@ -866,6 +896,7 @@ class AppUser {
 class ProfileInput {
   ProfileInput({
     this.fullName,
+    this.profileImageUrl,
     this.phone,
     this.address,
     this.city,
@@ -873,6 +904,7 @@ class ProfileInput {
   });
 
   final String? fullName;
+  final String? profileImageUrl;
   final String? phone;
   final String? address;
   final String? city;
@@ -880,6 +912,7 @@ class ProfileInput {
 
   Map<String, dynamic> toJson() => {
     'full_name': fullName,
+    'profile_image_url': profileImageUrl,
     'phone': phone,
     'address': address,
     'city': city,
@@ -2907,7 +2940,7 @@ class _DashboardShellState extends State<DashboardShell> {
           ),
           const NavigationDestination(
             icon: Icon(Icons.person_outline),
-            label: 'Account',
+            label: 'Profile',
           ),
           if (isAdmin)
             const NavigationDestination(
@@ -2935,7 +2968,7 @@ class _DashboardShellState extends State<DashboardShell> {
           ),
           const NavigationRailDestination(
             icon: Icon(Icons.person_outline),
-            label: Text('Account'),
+            label: Text('Profile'),
           ),
           if (isAdmin)
             const NavigationRailDestination(
@@ -2947,7 +2980,7 @@ class _DashboardShellState extends State<DashboardShell> {
         return Scaffold(
           appBar: AppBar(
             title: Text(
-              user == null ? 'NGX Portfolio' : 'Welcome, ${user.displayName}',
+              user == null ? 'NGX Portfolio' : 'Welcome, ${user.firstName}',
             ),
             actions: [
               if (sessionCountdownLabel != null)
@@ -3127,16 +3160,6 @@ class _HomeScreenState extends State<HomeScreen> {
           return ListView(
             padding: const EdgeInsets.all(16),
             children: [
-              Text(
-                'Welcome, ${widget.user?.displayName ?? 'investor'}',
-                style: Theme.of(context).textTheme.headlineSmall,
-              ),
-              const SizedBox(height: 4),
-              Text(
-                widget.user?.email ?? '',
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
-              const SizedBox(height: 16),
               Wrap(
                 spacing: 12,
                 runSpacing: 12,
@@ -3211,43 +3234,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   );
                 },
               ),
-              const SizedBox(height: 16),
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Profile',
-                        style: Theme.of(context).textTheme.titleMedium,
-                      ),
-                      const SizedBox(height: 8),
-                      ProfileLine(
-                        icon: Icons.verified_user_outlined,
-                        label: 'Email status',
-                        value: widget.user?.emailVerified == true
-                            ? 'Verified'
-                            : 'Not verified',
-                      ),
-                      ProfileLine(
-                        icon: Icons.phone_outlined,
-                        label: 'Phone',
-                        value: widget.user?.phone ?? 'Not set',
-                      ),
-                      ProfileLine(
-                        icon: Icons.location_on_outlined,
-                        label: 'Location',
-                        value: [widget.user?.city, widget.user?.country]
-                            .whereType<String>()
-                            .where((value) => value.isNotEmpty)
-                            .join(', ')
-                            .withFallback('Not set'),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
             ],
           );
         },
@@ -3282,11 +3268,14 @@ class _AccountScreenState extends State<AccountScreen> {
   final address = TextEditingController();
   final city = TextEditingController();
   final country = TextEditingController();
+  final imagePicker = ImagePicker();
   int? loadedUserId;
+  String? profileImageUrl;
   bool savingProfile = false;
   bool sendingVerification = false;
   bool sendingReport = false;
   bool deletingAccount = false;
+  bool pickingProfileImage = false;
 
   @override
   void dispose() {
@@ -3302,6 +3291,7 @@ class _AccountScreenState extends State<AccountScreen> {
     if (loadedUserId == user.id) return;
     loadedUserId = user.id;
     fullName.text = user.fullName ?? '';
+    profileImageUrl = user.profileImageUrl;
     phone.text = user.phone ?? '';
     address.text = user.address ?? '';
     city.text = user.city ?? '';
@@ -3314,6 +3304,7 @@ class _AccountScreenState extends State<AccountScreen> {
       await widget.api.updateProfile(
         ProfileInput(
           fullName: blankToNull(fullName.text),
+          profileImageUrl: profileImageUrl,
           phone: blankToNull(phone.text),
           address: blankToNull(address.text),
           city: blankToNull(city.text),
@@ -3328,6 +3319,36 @@ class _AccountScreenState extends State<AccountScreen> {
     } finally {
       if (mounted) setState(() => savingProfile = false);
     }
+  }
+
+  Future<void> pickProfileImage() async {
+    setState(() => pickingProfileImage = true);
+    try {
+      final file = await imagePicker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 72,
+        maxWidth: 720,
+        maxHeight: 720,
+      );
+      if (file == null) return;
+      final bytes = await file.readAsBytes();
+      if (bytes.isEmpty) return;
+      final mimeType = (file.mimeType != null && file.mimeType!.isNotEmpty)
+          ? file.mimeType!
+          : 'image/jpeg';
+      if (!mounted) return;
+      setState(() {
+        profileImageUrl = 'data:$mimeType;base64,${base64Encode(bytes)}';
+      });
+    } catch (error) {
+      if (mounted) showError(context, error.toString());
+    } finally {
+      if (mounted) setState(() => pickingProfileImage = false);
+    }
+  }
+
+  void clearProfileImage() {
+    setState(() => profileImageUrl = null);
   }
 
   Future<void> sendVerification() async {
@@ -3494,13 +3515,12 @@ class _AccountScreenState extends State<AccountScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        CircleAvatar(
-                          child: Text(
-                            user.displayName.isEmpty
-                                ? '?'
-                                : user.displayName[0].toUpperCase(),
-                          ),
+                        ProfileAvatar(
+                          imageUrl: profileImageUrl,
+                          fallbackText: user.firstName,
+                          radius: 30,
                         ),
                         const SizedBox(width: 12),
                         Expanded(
@@ -3536,7 +3556,44 @@ class _AccountScreenState extends State<AccountScreen> {
                               ),
                       ],
                     ),
+                    const SizedBox(height: 12),
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 12,
+                      children: [
+                        OutlinedButton.icon(
+                          onPressed: pickingProfileImage
+                              ? null
+                              : pickProfileImage,
+                          icon: pickingProfileImage
+                              ? const SizedBox.square(
+                                  dimension: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.photo_camera_back_outlined),
+                          label: const Text('Upload photo'),
+                        ),
+                        if (profileImageUrl != null)
+                          OutlinedButton.icon(
+                            onPressed: clearProfileImage,
+                            icon: const Icon(Icons.delete_outline),
+                            label: const Text('Remove photo'),
+                          ),
+                      ],
+                    ),
                     const SizedBox(height: 16),
+                    ProfileLine(
+                      icon: Icons.alternate_email,
+                      label: 'Email',
+                      value: user.email,
+                    ),
+                    ProfileLine(
+                      icon: Icons.verified_user_outlined,
+                      label: 'Email status',
+                      value: user.emailVerified ? 'Verified' : 'Not verified',
+                    ),
                     ProfileLine(
                       icon: Icons.phone_outlined,
                       label: 'Phone',
@@ -5451,6 +5508,33 @@ class ProfileLine extends StatelessWidget {
           Expanded(child: Text(value)),
         ],
       ),
+    );
+  }
+}
+
+class ProfileAvatar extends StatelessWidget {
+  const ProfileAvatar({
+    super.key,
+    required this.imageUrl,
+    required this.fallbackText,
+    this.radius = 24,
+  });
+
+  final String? imageUrl;
+  final String fallbackText;
+  final double radius;
+
+  @override
+  Widget build(BuildContext context) {
+    final provider = profileImageProvider(imageUrl);
+    final trimmed = fallbackText.trim();
+    final firstLetter = trimmed.isEmpty
+        ? '?'
+        : trimmed.substring(0, 1).toUpperCase();
+    return CircleAvatar(
+      radius: radius,
+      backgroundImage: provider,
+      child: provider == null ? Text(firstLetter) : null,
     );
   }
 }

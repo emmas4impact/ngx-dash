@@ -205,6 +205,7 @@ async def background_stock_sync_loop() -> None:
 def ensure_runtime_schema() -> None:
     with engine.begin() as conn:
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_superuser BOOLEAN NOT NULL DEFAULT false"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_image_url TEXT"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(64)"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS address VARCHAR(255)"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS city VARCHAR(128)"))
@@ -494,6 +495,7 @@ def update_me(
     user: User = Depends(get_current_user),
 ) -> User:
     user.full_name = payload.full_name.strip() if payload.full_name else None
+    user.profile_image_url = payload.profile_image_url.strip() if payload.profile_image_url else None
     user.phone = payload.phone.strip() if payload.phone else None
     user.address = payload.address.strip() if payload.address else None
     user.city = payload.city.strip() if payload.city else None

@@ -32,6 +32,7 @@ class UserOut(BaseModel):
     id: int
     email: EmailStr
     full_name: str | None = None
+    profile_image_url: str | None = None
     phone: str | None = None
     address: str | None = None
     city: str | None = None
@@ -46,6 +47,7 @@ class UserOut(BaseModel):
 
 class ProfileUpdate(BaseModel):
     full_name: str | None = Field(default=None, max_length=255)
+    profile_image_url: str | None = Field(default=None, max_length=2_000_000)
     phone: str | None = Field(default=None, max_length=64)
     address: str | None = Field(default=None, max_length=255)
     city: str | None = Field(default=None, max_length=128)
