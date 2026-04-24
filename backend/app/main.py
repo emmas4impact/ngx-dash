@@ -111,6 +111,20 @@ def intraday_leader_payload(stock: Stock) -> dict | None:
     return payload
 
 
+def market_leaders_payload(db: Session, limit: int) -> dict:
+    stocks = db.scalars(
+        select(Stock)
+        .where(Stock.last_price.is_not(None), Stock.open_price.is_not(None))
+        .order_by(Stock.symbol)
+    ).all()
+    ranked = [payload for stock in stocks if (payload := intraday_leader_payload(stock)) is not None]
+    ranked.sort(key=lambda item: (item["percent_change"], item["symbol"]), reverse=True)
+    return {
+        "top_movers": ranked[:limit],
+        "top_losers": sorted(ranked, key=lambda item: (item["percent_change"], item["symbol"]))[:limit],
+    }
+
+
 def ensure_stock_ngx_id(db: Session, stock: Stock) -> str | None:
     if stock.ngx_id:
         return stock.ngx_id
@@ -241,6 +255,19 @@ def public_stock_logo(symbol: str) -> Response:
         media_type=media_type,
         headers={"Cache-Control": "public, max-age=86400"},
     )
+
+
+@app.get("/public/market/status", response_model=MarketStatusOut, include_in_schema=False)
+def public_market_status(db: Session = Depends(get_db)) -> dict:
+    return get_cached_market_status(db)
+
+
+@app.get("/public/market/leaders", response_model=MarketLeadersOut, include_in_schema=False)
+def public_market_leaders(
+    limit: int = Query(default=6, ge=1, le=20),
+    db: Session = Depends(get_db),
+) -> dict:
+    return market_leaders_payload(db, limit)
 
 
 @app.get("/public/privacy-policy", include_in_schema=False, response_class=HTMLResponse)
@@ -528,19 +555,7 @@ def get_market_leaders(
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ) -> dict:
-    stocks = db.scalars(
-        select(Stock)
-        .where(Stock.last_price.is_not(None), Stock.open_price.is_not(None))
-        .order_by(Stock.symbol)
-    ).all()
-    ranked = [payload for stock in stocks if (payload := intraday_leader_payload(stock)) is not None]
-    ranked.sort(key=lambda item: (item["percent_change"], item["symbol"]), reverse=True)
-    top_movers = ranked[:limit]
-    top_losers = sorted(ranked, key=lambda item: (item["percent_change"], item["symbol"]))[:limit]
-    return {
-        "top_movers": top_movers,
-        "top_losers": top_losers,
-    }
+    return market_leaders_payload(db, limit)
 
 
 @app.get("/stocks", response_model=list[StockOut])

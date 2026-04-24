@@ -443,6 +443,14 @@ class ApiClient {
     );
   }
 
+  Future<MarketStatus> publicMarketStatus() async {
+    final response = await _client.get(_uri('/public/market/status'));
+    _expect(response, 200);
+    return MarketStatus.fromJson(
+      jsonDecode(response.body) as Map<String, dynamic>,
+    );
+  }
+
   Future<MarketSnapshot> marketSnapshot() async {
     final response = await _client.get(
       _uri('/market/snapshot'),
@@ -458,6 +466,16 @@ class ApiClient {
     final response = await _client.get(
       _uri('/market/leaders', {'limit': '$limit'}),
       headers: _headers,
+    );
+    _expect(response, 200);
+    return MarketLeaders.fromJson(
+      jsonDecode(response.body) as Map<String, dynamic>,
+    );
+  }
+
+  Future<MarketLeaders> publicMarketLeaders({int limit = 6}) async {
+    final response = await _client.get(
+      _uri('/public/market/leaders', {'limit': '$limit'}),
     );
     _expect(response, 200);
     return MarketLeaders.fromJson(
@@ -515,6 +533,8 @@ class Stock {
     required this.symbol,
     this.name,
     this.lastPrice,
+    this.openPrice,
+    this.change,
     this.percentChange,
     this.margin,
     this.volume,
@@ -527,6 +547,8 @@ class Stock {
   final String symbol;
   final String? name;
   final double? lastPrice;
+  final double? openPrice;
+  final double? change;
   final double? percentChange;
   final double? margin;
   final double? volume;
@@ -542,6 +564,8 @@ class Stock {
       symbol: json['symbol'] as String,
       name: json['name'] as String?,
       lastPrice: asDouble(json['last_price']),
+      openPrice: asDouble(json['open_price']),
+      change: asDouble(json['change']),
       percentChange: asDouble(json['percent_change']),
       margin: asDouble(json['margin']),
       volume: asDouble(json['volume']),
@@ -840,6 +864,13 @@ class MarketLeaders {
   }
 }
 
+class LandingMarketData {
+  LandingMarketData({required this.status, required this.leaders});
+
+  final MarketStatus status;
+  final MarketLeaders leaders;
+}
+
 class PushStatusSummary {
   PushStatusSummary({
     required this.enabled,
@@ -1014,6 +1045,39 @@ class _AuthScreenState extends State<AuthScreen> {
   final fullName = TextEditingController();
   bool registerMode = false;
   bool busy = false;
+  late Future<LandingMarketData> landingFuture = _loadLandingData();
+  Timer? landingRefreshTimer;
+  Timer? marketMotionTimer;
+  int marketHeadlineIndex = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    landingRefreshTimer = Timer.periodic(const Duration(seconds: 45), (_) {
+      if (!mounted) return;
+      setState(() => landingFuture = _loadLandingData());
+    });
+    marketMotionTimer = Timer.periodic(const Duration(seconds: 4), (_) {
+      if (!mounted) return;
+      setState(() => marketHeadlineIndex++);
+    });
+  }
+
+  @override
+  void dispose() {
+    landingRefreshTimer?.cancel();
+    marketMotionTimer?.cancel();
+    email.dispose();
+    password.dispose();
+    fullName.dispose();
+    super.dispose();
+  }
+
+  Future<LandingMarketData> _loadLandingData() async {
+    final status = await widget.api.publicMarketStatus();
+    final leaders = await widget.api.publicMarketLeaders(limit: 6);
+    return LandingMarketData(status: status, leaders: leaders);
+  }
 
   Future<void> submit() async {
     setState(() => busy = true);
@@ -1037,85 +1101,742 @@ class _AuthScreenState extends State<AuthScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Scaffold(
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 440),
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Card(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Text(
-                      'NGX Portfolio',
-                      style: Theme.of(context).textTheme.headlineMedium,
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      registerMode
-                          ? 'Create an account to track holdings.'
-                          : 'Sign in to view your dashboard.',
-                      style: Theme.of(context).textTheme.bodyMedium,
-                    ),
-                    const SizedBox(height: 24),
-                    if (registerMode) ...[
-                      TextField(
-                        controller: fullName,
-                        decoration: const InputDecoration(
-                          prefixIcon: Icon(Icons.badge_outlined),
-                          labelText: 'Name',
-                        ),
+      body: FutureBuilder<LandingMarketData>(
+        future: landingFuture,
+        builder: (context, snapshot) {
+          final landing = snapshot.data;
+          final combinedLeaders = <Stock>[
+            ...(landing?.leaders.topMovers ?? const <Stock>[]),
+            ...(landing?.leaders.topLosers ?? const <Stock>[]),
+          ];
+          final headlineStock = combinedLeaders.isEmpty
+              ? null
+              : combinedLeaders[marketHeadlineIndex % combinedLeaders.length];
+
+          return Container(
+            decoration: const BoxDecoration(color: Color(0xFFF5F8F7)),
+            child: SafeArea(
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final isDesktop = constraints.maxWidth >= 1120;
+                  final authPanel = _AuthHeroPanel(
+                    theme: theme,
+                    registerMode: registerMode,
+                    busy: busy,
+                    fullName: fullName,
+                    email: email,
+                    password: password,
+                    onSubmit: submit,
+                    onToggleMode: () =>
+                        setState(() => registerMode = !registerMode),
+                  );
+                  final marketView = _LandingMarketView(
+                    theme: theme,
+                    landing: landing,
+                    loading:
+                        snapshot.connectionState == ConnectionState.waiting &&
+                        landing == null,
+                    headlineStock: headlineStock,
+                  );
+
+                  if (isDesktop) {
+                    return Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          SizedBox(width: 370, child: authPanel),
+                          const SizedBox(width: 20),
+                          Expanded(child: marketView),
+                        ],
                       ),
-                      const SizedBox(height: 12),
+                    );
+                  }
+
+                  return RefreshIndicator(
+                    onRefresh: () async {
+                      setState(() => landingFuture = _loadLandingData());
+                      await landingFuture;
+                    },
+                    child: ListView(
+                      padding: const EdgeInsets.all(16),
+                      children: [
+                        authPanel,
+                        const SizedBox(height: 16),
+                        marketView,
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _AuthHeroPanel extends StatelessWidget {
+  const _AuthHeroPanel({
+    required this.theme,
+    required this.registerMode,
+    required this.busy,
+    required this.fullName,
+    required this.email,
+    required this.password,
+    required this.onSubmit,
+    required this.onToggleMode,
+  });
+
+  final ThemeData theme;
+  final bool registerMode;
+  final bool busy;
+  final TextEditingController fullName;
+  final TextEditingController email;
+  final TextEditingController password;
+  final Future<void> Function() onSubmit;
+  final VoidCallback onToggleMode;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFD7E2DE)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF0E7C66).withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(
+                    Icons.candlestick_chart,
+                    color: Color(0xFF0E7C66),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Stockfolio NG', style: theme.textTheme.titleLarge),
+                      Text(
+                        'Track Nigerian equities with live market context.',
+                        style: theme.textTheme.bodySmall,
+                      ),
                     ],
-                    TextField(
-                      controller: email,
-                      keyboardType: TextInputType.emailAddress,
-                      decoration: const InputDecoration(
-                        prefixIcon: Icon(Icons.mail_outline),
-                        labelText: 'Email',
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 28),
+            Text(
+              registerMode ? 'Create your account' : 'Welcome back',
+              style: theme.textTheme.headlineSmall,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              registerMode
+                  ? 'Build a personal portfolio, watch movers, and follow your holdings with charts.'
+                  : 'Sign in to your dashboard, portfolio alerts, charts, and market overview.',
+              style: theme.textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 20),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: const [
+                _LandingTag(icon: Icons.show_chart, text: 'Live market view'),
+                _LandingTag(
+                  icon: Icons.account_balance_wallet,
+                  text: 'Portfolio tracking',
+                ),
+                _LandingTag(
+                  icon: Icons.notifications_active_outlined,
+                  text: 'Alerts',
+                ),
+              ],
+            ),
+            const SizedBox(height: 24),
+            if (registerMode) ...[
+              TextField(
+                controller: fullName,
+                decoration: const InputDecoration(
+                  prefixIcon: Icon(Icons.badge_outlined),
+                  labelText: 'Name',
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
+            TextField(
+              controller: email,
+              keyboardType: TextInputType.emailAddress,
+              decoration: const InputDecoration(
+                prefixIcon: Icon(Icons.mail_outline),
+                labelText: 'Email',
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: password,
+              obscureText: true,
+              decoration: const InputDecoration(
+                prefixIcon: Icon(Icons.lock_outline),
+                labelText: 'Password',
+              ),
+            ),
+            const SizedBox(height: 20),
+            FilledButton.icon(
+              onPressed: busy ? null : onSubmit,
+              icon: busy
+                  ? const SizedBox.square(
+                      dimension: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : Icon(registerMode ? Icons.person_add_alt_1 : Icons.login),
+              label: Text(registerMode ? 'Create account' : 'Sign in'),
+            ),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton(
+                onPressed: busy ? null : onToggleMode,
+                child: Text(
+                  registerMode ? 'Use existing account' : 'Create new account',
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _LandingMarketView extends StatelessWidget {
+  const _LandingMarketView({
+    required this.theme,
+    required this.landing,
+    required this.loading,
+    required this.headlineStock,
+  });
+
+  final ThemeData theme;
+  final LandingMarketData? landing;
+  final bool loading;
+  final Stock? headlineStock;
+
+  @override
+  Widget build(BuildContext context) {
+    final leaders = landing?.leaders;
+    final movers = leaders?.topMovers ?? const <Stock>[];
+    final losers = leaders?.topLosers ?? const <Stock>[];
+    final chartStocks = [...movers.take(3), ...losers.take(2)];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Container(
+          padding: const EdgeInsets.all(22),
+          decoration: BoxDecoration(
+            color: const Color(0xFF10352F),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      landing == null
+                          ? 'Market pulse loading'
+                          : 'Market status: ${landing!.status.status}',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: password,
-                      obscureText: true,
-                      decoration: const InputDecoration(
-                        prefixIcon: Icon(Icons.lock_outline),
-                        labelText: 'Password',
+                  ),
+                  if (landing?.status.message != null &&
+                      landing!.status.message!.isNotEmpty)
+                    Text(
+                      landing!.status.message!,
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.78),
                       ),
                     ),
-                    const SizedBox(height: 20),
-                    FilledButton.icon(
-                      onPressed: busy ? null : submit,
-                      icon: busy
-                          ? const SizedBox.square(
-                              dimension: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.login),
-                      label: Text(registerMode ? 'Create account' : 'Sign in'),
+                ],
+              ),
+              const SizedBox(height: 18),
+              Text(
+                'See the market move before you even log in.',
+                style: theme.textTheme.headlineMedium?.copyWith(
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                'Live movers, opening-versus-current momentum, and a portfolio-focused workflow for Nigerian equities.',
+                style: theme.textTheme.bodyLarge?.copyWith(
+                  color: Colors.white.withValues(alpha: 0.82),
+                ),
+              ),
+              const SizedBox(height: 18),
+              if (loading)
+                const LinearProgressIndicator()
+              else if (headlineStock != null)
+                _LandingHeadlineCard(stock: headlineStock!),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          children: [
+            _LandingMetricTile(
+              label: 'Top movers tracked',
+              value: movers.length.toString(),
+              icon: Icons.local_fire_department_outlined,
+              tone: const Color(0xFFDB5C19),
+            ),
+            _LandingMetricTile(
+              label: 'Top losers tracked',
+              value: losers.length.toString(),
+              icon: Icons.trending_down_outlined,
+              tone: const Color(0xFFB83232),
+            ),
+            _LandingMetricTile(
+              label: 'Market mood',
+              value: landing?.status.status ?? 'Loading',
+              icon: Icons.wifi_tethering_outlined,
+              tone: const Color(0xFF0E7C66),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final chartPanel = Container(
+              constraints: const BoxConstraints(minHeight: 340),
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFFD7E2DE)),
+              ),
+              child: _LandingPulseChart(stocks: chartStocks),
+            );
+            final sidePanel = Column(
+              children: [
+                MarketLeaderPanel(
+                  title: 'Top movers',
+                  icon: Icons.local_fire_department_outlined,
+                  stocks: movers,
+                  positive: true,
+                ),
+                const SizedBox(height: 12),
+                MarketLeaderPanel(
+                  title: 'Top losers',
+                  icon: Icons.trending_down_outlined,
+                  stocks: losers,
+                  positive: false,
+                ),
+              ],
+            );
+
+            if (constraints.maxWidth >= 980) {
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(flex: 8, child: chartPanel),
+                  const SizedBox(width: 16),
+                  Expanded(flex: 5, child: sidePanel),
+                ],
+              );
+            }
+
+            return Column(
+              children: [chartPanel, const SizedBox(height: 12), sidePanel],
+            );
+          },
+        ),
+      ],
+    );
+  }
+}
+
+class _LandingHeadlineCard extends StatelessWidget {
+  const _LandingHeadlineCard({required this.stock});
+
+  final Stock stock;
+
+  @override
+  Widget build(BuildContext context) {
+    final positive = (stock.percentChange ?? 0) >= 0;
+    final accent = positive ? const Color(0xFF5ED19B) : const Color(0xFFFFB4B4);
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 500),
+      child: Container(
+        key: ValueKey(stock.symbol),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+        ),
+        child: Row(
+          children: [
+            CompanyLogo(symbol: stock.symbol, size: 46),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    stock.symbol,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 18,
                     ),
-                    TextButton(
-                      onPressed: busy
-                          ? null
-                          : () => setState(() => registerMode = !registerMode),
-                      child: Text(
-                        registerMode
-                            ? 'Use existing account'
-                            : 'Create new account',
+                  ),
+                  Text(
+                    stock.name ?? stock.symbol,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.72),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  stock.lastPrice == null
+                      ? 'No price'
+                      : moneyFormat.format(stock.lastPrice),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 18,
+                  ),
+                ),
+                Text(
+                  '${stock.percentChange?.toStringAsFixed(2) ?? '0.00'}%',
+                  style: TextStyle(color: accent, fontWeight: FontWeight.w700),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _LandingPulseChart extends StatelessWidget {
+  const _LandingPulseChart({required this.stocks});
+
+  final List<Stock> stocks;
+
+  @override
+  Widget build(BuildContext context) {
+    if (stocks.isEmpty) {
+      return const EmptyState(
+        icon: Icons.multiline_chart,
+        text: 'Market graph is warming up.',
+      );
+    }
+
+    final lines = <_LandingChartSeries>[];
+    final allY = <double>[];
+    final palette = <Color>[
+      const Color(0xFF0E7C66),
+      const Color(0xFFDB5C19),
+      const Color(0xFF3A7BD5),
+      const Color(0xFF9C27B0),
+      const Color(0xFFB83232),
+    ];
+
+    for (var i = 0; i < stocks.length; i++) {
+      final stock = stocks[i];
+      final open = stock.openPrice ?? stock.lastPrice;
+      final close = stock.lastPrice;
+      if (open == null || close == null || open <= 0 || close <= 0) {
+        continue;
+      }
+      final delta = close - open;
+      final spots = List.generate(10, (index) {
+        final t = index / 9;
+        final curve = sin(t * pi) * delta * 0.22;
+        final value = open + (delta * t) + curve;
+        allY.add(value);
+        return FlSpot(index.toDouble(), value);
+      });
+      lines.add(
+        _LandingChartSeries(
+          stock: stock,
+          color: palette[i % palette.length],
+          spots: spots,
+        ),
+      );
+    }
+
+    if (lines.isEmpty || allY.isEmpty) {
+      return const EmptyState(
+        icon: Icons.multiline_chart,
+        text: 'Market graph is warming up.',
+      );
+    }
+
+    final minY = allY.reduce(min);
+    final maxY = allY.reduce(max);
+    final padding = max(0.5, (maxY - minY) * 0.16);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Market pulse', style: Theme.of(context).textTheme.titleLarge),
+        const SizedBox(height: 6),
+        Text(
+          'A live-style view built from today’s opening price versus current market price.',
+          style: Theme.of(context).textTheme.bodyMedium,
+        ),
+        const SizedBox(height: 16),
+        SizedBox(
+          height: 230,
+          child: LineChart(
+            LineChartData(
+              minX: 0,
+              maxX: 9,
+              minY: minY - padding,
+              maxY: maxY + padding,
+              borderData: FlBorderData(show: false),
+              gridData: FlGridData(
+                show: true,
+                drawVerticalLine: false,
+                getDrawingHorizontalLine: (_) =>
+                    FlLine(color: const Color(0xFFE2E8E6), strokeWidth: 1),
+              ),
+              titlesData: FlTitlesData(
+                topTitles: const AxisTitles(
+                  sideTitles: SideTitles(showTitles: false),
+                ),
+                rightTitles: const AxisTitles(
+                  sideTitles: SideTitles(showTitles: false),
+                ),
+                bottomTitles: AxisTitles(
+                  sideTitles: SideTitles(
+                    showTitles: true,
+                    reservedSize: 28,
+                    getTitlesWidget: (value, meta) {
+                      final labels = [
+                        'Open',
+                        '',
+                        '',
+                        'Noon',
+                        '',
+                        '',
+                        '',
+                        '',
+                        '',
+                        'Now',
+                      ];
+                      final index = value.round();
+                      if (index < 0 ||
+                          index >= labels.length ||
+                          labels[index].isEmpty) {
+                        return const SizedBox.shrink();
+                      }
+                      return Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Text(labels[index]),
+                      );
+                    },
+                  ),
+                ),
+                leftTitles: AxisTitles(
+                  sideTitles: SideTitles(
+                    showTitles: true,
+                    reservedSize: 58,
+                    getTitlesWidget: (value, meta) => Text(
+                      NumberFormat.compactCurrency(
+                        symbol: 'NGN ',
+                      ).format(value),
+                    ),
+                  ),
+                ),
+              ),
+              lineBarsData: [
+                for (final line in lines)
+                  LineChartBarData(
+                    spots: line.spots,
+                    isCurved: true,
+                    barWidth: 3,
+                    color: line.color,
+                    dotData: const FlDotData(show: false),
+                  ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 14),
+        Wrap(
+          spacing: 12,
+          runSpacing: 10,
+          children: [
+            for (final line in lines)
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+                decoration: BoxDecoration(
+                  color: line.color.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: line.color.withValues(alpha: 0.18)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 10,
+                      height: 10,
+                      decoration: BoxDecoration(
+                        color: line.color,
+                        shape: BoxShape.circle,
                       ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      '${line.stock.symbol} ${line.stock.percentChange?.toStringAsFixed(2) ?? '0.00'}%',
+                      style: const TextStyle(fontWeight: FontWeight.w700),
                     ),
                   ],
                 ),
               ),
-            ),
-          ),
+          ],
         ),
+      ],
+    );
+  }
+}
+
+class _LandingChartSeries {
+  const _LandingChartSeries({
+    required this.stock,
+    required this.color,
+    required this.spots,
+  });
+
+  final Stock stock;
+  final Color color;
+  final List<FlSpot> spots;
+}
+
+class _LandingMetricTile extends StatelessWidget {
+  const _LandingMetricTile({
+    required this.label,
+    required this.value,
+    required this.icon,
+    required this.tone,
+  });
+
+  final String label;
+  final String value;
+  final IconData icon;
+  final Color tone;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 220,
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: const Color(0xFFD7E2DE)),
+        ),
+        child: Row(
+          children: [
+            CircleAvatar(
+              backgroundColor: tone.withValues(alpha: 0.12),
+              child: Icon(icon, color: tone),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(label, style: Theme.of(context).textTheme.labelMedium),
+                  const SizedBox(height: 4),
+                  Text(
+                    value,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _LandingTag extends StatelessWidget {
+  const _LandingTag({required this.icon, required this.text});
+
+  final IconData icon;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF0F6F3),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: const Color(0xFFD7E2DE)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 16, color: const Color(0xFF0E7C66)),
+          const SizedBox(width: 6),
+          Text(text),
+        ],
       ),
     );
   }
