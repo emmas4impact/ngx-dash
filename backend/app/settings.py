@@ -52,6 +52,10 @@ class Settings(BaseSettings):
     smtp_use_tls: bool = Field(default=True, validation_alias="SMTP_USE_TLS")
     resend_api_key: str | None = Field(default=None, validation_alias="RESEND_API_KEY")
     resend_from_email: str | None = Field(default=None, validation_alias="RESEND_FROM_EMAIL")
+    firebase_project_id: str | None = Field(default=None, validation_alias="FIREBASE_PROJECT_ID")
+    firebase_service_account_json: str | None = Field(default=None, validation_alias="FIREBASE_SERVICE_ACCOUNT_JSON")
+    firebase_service_account_file: str | None = Field(default=None, validation_alias="FIREBASE_SERVICE_ACCOUNT_FILE")
+    push_alert_threshold_percent: float = Field(default=5.0, validation_alias="PUSH_ALERT_THRESHOLD_PERCENT")
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
@@ -94,6 +98,10 @@ class Settings(BaseSettings):
     @property
     def contact_email(self) -> str | None:
         return self.support_email or self.from_email or (self.admin_email_list[0] if self.admin_email_list else None)
+
+    @property
+    def push_enabled(self) -> bool:
+        return bool(self.firebase_project_id and (self.firebase_service_account_json or self.firebase_service_account_file))
 
 
 @lru_cache

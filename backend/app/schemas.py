@@ -52,6 +52,16 @@ class AccountDeleteRequest(BaseModel):
     password: str = Field(min_length=1, max_length=72)
 
 
+class PushTokenUpsert(BaseModel):
+    token: str = Field(min_length=16, max_length=512)
+    platform: str = Field(min_length=2, max_length=32)
+    device_label: str | None = Field(default=None, max_length=255)
+
+
+class PushTokenDelete(BaseModel):
+    token: str = Field(min_length=16, max_length=512)
+
+
 class MessageResponse(BaseModel):
     message: str
     verification_url: str | None = None
@@ -178,6 +188,20 @@ class StockDetailOut(BaseModel):
 class MarketLeadersOut(BaseModel):
     top_movers: list[StockOut]
     top_losers: list[StockOut]
+
+
+class PushStatusOut(BaseModel):
+    enabled: bool
+    project_id: str | None = None
+    registered_devices: int = 0
+    users_with_devices: int = 0
+    threshold_percent: float = 5.0
+
+
+class PushTestRequest(BaseModel):
+    title: str | None = Field(default=None, max_length=120)
+    body: str | None = Field(default=None, max_length=240)
+    symbol: str | None = Field(default=None, max_length=32)
 
 
 class AccountDeletionRequestCreate(BaseModel):

@@ -12,6 +12,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app_version.dart';
 import 'config.dart';
+import 'push_notifications.dart';
 import 'stock_logo_assets.dart';
 
 final apiBaseUrl = normalizeApiBaseUrl(configuredApiBaseUrl());
@@ -35,7 +36,8 @@ String normalizeApiBaseUrl(String value) {
   return 'https://$trimmed';
 }
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(const NgxPortfolioApp());
 }
 
@@ -72,6 +74,9 @@ class _NgxPortfolioAppState extends State<NgxPortfolioApp> {
   }
 
   Future<void> _signOut() async {
+    await PushNotifications.instance.unregister(
+      removeToken: api.unregisterPushToken,
+    );
     await api.clearToken();
     setState(() => authenticated = false);
   }
@@ -251,6 +256,27 @@ class ApiClient {
     return data['message']?.toString() ?? 'Portfolio report request complete.';
   }
 
+  Future<void> registerPushToken(
+    String token, {
+    required String platform,
+  }) async {
+    final response = await _client.post(
+      _uri('/me/push-tokens'),
+      headers: _headers,
+      body: jsonEncode({'token': token, 'platform': platform}),
+    );
+    _expect(response, 200);
+  }
+
+  Future<void> unregisterPushToken(String token) async {
+    final request = http.Request('DELETE', _uri('/me/push-tokens'))
+      ..headers.addAll(_headers)
+      ..body = jsonEncode({'token': token});
+    final streamed = await _client.send(request);
+    final response = await http.Response.fromStream(streamed);
+    _expect(response, 204);
+  }
+
   Future<List<Stock>> stocks({String? search}) async {
     final response = await _client.get(
       _uri(
@@ -382,6 +408,28 @@ class ApiClient {
           ),
         )
         .toList();
+  }
+
+  Future<PushStatusSummary> pushStatus() async {
+    final response = await _client.get(
+      _uri('/admin/push/status'),
+      headers: _headers,
+    );
+    _expect(response, 200);
+    return PushStatusSummary.fromJson(
+      jsonDecode(response.body) as Map<String, dynamic>,
+    );
+  }
+
+  Future<String> sendTestPush({String? symbol}) async {
+    final response = await _client.post(
+      _uri('/admin/push/test'),
+      headers: _headers,
+      body: jsonEncode({'symbol': symbol}),
+    );
+    _expect(response, 200);
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return data['message']?.toString() ?? 'Push test sent.';
   }
 
   Future<MarketStatus> marketStatus() async {
@@ -792,6 +840,32 @@ class MarketLeaders {
   }
 }
 
+class PushStatusSummary {
+  PushStatusSummary({
+    required this.enabled,
+    this.projectId,
+    required this.registeredDevices,
+    required this.usersWithDevices,
+    required this.thresholdPercent,
+  });
+
+  final bool enabled;
+  final String? projectId;
+  final int registeredDevices;
+  final int usersWithDevices;
+  final double thresholdPercent;
+
+  factory PushStatusSummary.fromJson(Map<String, dynamic> json) {
+    return PushStatusSummary(
+      enabled: json['enabled'] == true,
+      projectId: json['project_id'] as String?,
+      registeredDevices: (json['registered_devices'] as num?)?.toInt() ?? 0,
+      usersWithDevices: (json['users_with_devices'] as num?)?.toInt() ?? 0,
+      thresholdPercent: asDouble(json['threshold_percent']) ?? 5,
+    );
+  }
+}
+
 class CompanyNewsItem {
   CompanyNewsItem({
     this.title,
@@ -1146,7 +1220,11 @@ class _DashboardShellState extends State<DashboardShell> {
   int index = 0;
   late Future<AppUser> userFuture = widget.api.me();
   late final Future<PackageInfo> packageInfoFuture = PackageInfo.fromPlatform();
+  late final Future<PushRegistrationResult> pushSetupFuture = PushNotifications
+      .instance
+      .ensureRegistered(registerToken: widget.api.registerPushToken);
   Timer? alertTimer;
+  StreamSubscription<PushAlertMessage>? pushMessageSubscription;
   final Map<String, double> _lastSeenHoldingPrices = {};
   final Map<String, double> _lastAlertPrices = {};
 
@@ -1158,11 +1236,15 @@ class _DashboardShellState extends State<DashboardShell> {
       const Duration(minutes: 1),
       (_) => _checkPortfolioAlerts(),
     );
+    pushMessageSubscription = PushNotifications.instance.messages.listen(
+      _showPushMessage,
+    );
   }
 
   @override
   void dispose() {
     alertTimer?.cancel();
+    pushMessageSubscription?.cancel();
     super.dispose();
   }
 
@@ -1241,6 +1323,21 @@ class _DashboardShellState extends State<DashboardShell> {
     } catch (_) {}
   }
 
+  void _showPushMessage(PushAlertMessage message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text('${message.title}. ${message.body}'),
+          action: SnackBarAction(
+            label: 'Portfolio',
+            onPressed: () => setState(() => index = 1),
+          ),
+        ),
+      );
+  }
+
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<AppUser>(
@@ -1260,8 +1357,10 @@ class _DashboardShellState extends State<DashboardShell> {
             onProfileChanged: () {
               setState(() => userFuture = widget.api.me());
             },
+            pushSetupFuture: pushSetupFuture,
           ),
-          if (isAdmin) AdminScreen(api: widget.api),
+          if (isAdmin)
+            AdminScreen(api: widget.api, pushSetupFuture: pushSetupFuture),
         ];
         if (index >= screens.length) index = screens.length - 1;
 
@@ -1623,12 +1722,14 @@ class AccountScreen extends StatefulWidget {
     required this.userFuture,
     required this.onSignOut,
     required this.onProfileChanged,
+    required this.pushSetupFuture,
   });
 
   final ApiClient api;
   final Future<AppUser> userFuture;
   final Future<void> Function() onSignOut;
   final VoidCallback onProfileChanged;
+  final Future<PushRegistrationResult> pushSetupFuture;
 
   @override
   State<AccountScreen> createState() => _AccountScreenState();
@@ -1732,6 +1833,17 @@ class _AccountScreenState extends State<AccountScreen> {
         result.newPassword,
       );
       if (mounted) showMessage(context, message);
+    } catch (error) {
+      if (mounted) showError(context, error.toString());
+    }
+  }
+
+  Future<void> refreshPushSetup() async {
+    try {
+      final result = await PushNotifications.instance.ensureRegistered(
+        registerToken: widget.api.registerPushToken,
+      );
+      if (mounted) showMessage(context, result.message);
     } catch (error) {
       if (mounted) showError(context, error.toString());
     }
@@ -1907,6 +2019,50 @@ class _AccountScreenState extends State<AccountScreen> {
                   ],
                 ),
               ),
+            ),
+            const SizedBox(height: 16),
+            FutureBuilder<PushRegistrationResult>(
+              future: widget.pushSetupFuture,
+              builder: (context, snapshot) {
+                final pushResult =
+                    snapshot.data ?? PushNotifications.instance.lastResult;
+                final enabled = pushResult.enabled;
+                return Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(
+                              enabled
+                                  ? Icons.notifications_active_outlined
+                                  : Icons.notifications_off_outlined,
+                              color: enabled
+                                  ? Colors.green.shade700
+                                  : Colors.orange.shade800,
+                            ),
+                            const SizedBox(width: 10),
+                            Text(
+                              'Mobile push alerts',
+                              style: Theme.of(context).textTheme.titleMedium,
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Text(pushResult.message),
+                        const SizedBox(height: 12),
+                        OutlinedButton.icon(
+                          onPressed: refreshPushSetup,
+                          icon: const Icon(Icons.notifications_active_outlined),
+                          label: const Text('Refresh push setup'),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
             ),
             const SizedBox(height: 16),
             Card(
@@ -2946,9 +3102,14 @@ class _ChartsScreenState extends State<ChartsScreen> {
 }
 
 class AdminScreen extends StatefulWidget {
-  const AdminScreen({super.key, required this.api});
+  const AdminScreen({
+    super.key,
+    required this.api,
+    required this.pushSetupFuture,
+  });
 
   final ApiClient api;
+  final Future<PushRegistrationResult> pushSetupFuture;
 
   @override
   State<AdminScreen> createState() => _AdminScreenState();
@@ -2957,15 +3118,18 @@ class AdminScreen extends StatefulWidget {
 class _AdminScreenState extends State<AdminScreen> {
   late Future<SyncStatus> statusFuture = widget.api.syncStatus();
   late Future<List<SyncLogEntry>> logsFuture = widget.api.syncLogs();
+  late Future<PushStatusSummary> pushStatusFuture = widget.api.pushStatus();
   late Future<List<AccountDeletionRequestEntry>> deletionRequestsFuture = widget
       .api
       .accountDeletionRequests();
   bool syncing = false;
+  bool sendingTestPush = false;
 
   void refresh() {
     setState(() {
       statusFuture = widget.api.syncStatus();
       logsFuture = widget.api.syncLogs();
+      pushStatusFuture = widget.api.pushStatus();
       deletionRequestsFuture = widget.api.accountDeletionRequests();
     });
   }
@@ -2980,6 +3144,19 @@ class _AdminScreenState extends State<AdminScreen> {
       if (mounted) showError(context, error.toString());
     } finally {
       if (mounted) setState(() => syncing = false);
+    }
+  }
+
+  Future<void> sendTestPush() async {
+    setState(() => sendingTestPush = true);
+    try {
+      final message = await widget.api.sendTestPush();
+      refresh();
+      if (mounted) showMessage(context, message);
+    } catch (error) {
+      if (mounted) showError(context, error.toString());
+    } finally {
+      if (mounted) setState(() => sendingTestPush = false);
     }
   }
 
@@ -3052,6 +3229,81 @@ class _AdminScreenState extends State<AdminScreen> {
                           padding: const EdgeInsets.only(top: 8),
                           child: Text(status.message!),
                         ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+          const SizedBox(height: 12),
+          FutureBuilder<PushStatusSummary>(
+            future: pushStatusFuture,
+            builder: (context, snapshot) {
+              final pushStatus = snapshot.data;
+              if (pushStatus == null) {
+                return const Card(
+                  child: Padding(
+                    padding: EdgeInsets.all(16),
+                    child: LinearProgressIndicator(),
+                  ),
+                );
+              }
+              return Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            pushStatus.enabled
+                                ? Icons.notifications_active_outlined
+                                : Icons.notifications_off_outlined,
+                            color: pushStatus.enabled
+                                ? Colors.green.shade700
+                                : Colors.orange.shade800,
+                          ),
+                          const SizedBox(width: 10),
+                          Text(
+                            'Push notifications',
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        pushStatus.enabled
+                            ? 'Firebase push is configured on the backend.'
+                            : 'Firebase push is not configured yet.',
+                      ),
+                      Text(
+                        'Registered devices: ${pushStatus.registeredDevices}',
+                      ),
+                      Text(
+                        'Users with devices: ${pushStatus.usersWithDevices}',
+                      ),
+                      Text(
+                        'Alert threshold: ${pushStatus.thresholdPercent.toStringAsFixed(0)}%',
+                      ),
+                      if (pushStatus.projectId != null &&
+                          pushStatus.projectId!.isNotEmpty)
+                        Text('Project: ${pushStatus.projectId}'),
+                      const SizedBox(height: 12),
+                      FilledButton.icon(
+                        onPressed: pushStatus.enabled && !sendingTestPush
+                            ? sendTestPush
+                            : null,
+                        icon: sendingTestPush
+                            ? const SizedBox.square(
+                                dimension: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.send_outlined),
+                        label: const Text('Send test push'),
+                      ),
                     ],
                   ),
                 ),

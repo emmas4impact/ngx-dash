@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session, selectinload
 from .auth import create_access_token, get_current_superuser, get_current_user, hash_password, verify_password
 from .database import Base, SessionLocal, engine, get_db
 from .legal import render_account_deletion_html, render_privacy_policy_html
-from .models import AccountDeletionRequest, PortfolioHolding, Stock, User
+from .models import AccountDeletionRequest, PortfolioHolding, PushDeviceToken, Stock, User
 from .notifications import portfolio_report_pdf, send_email
 from .ngx_client import (
     NgxFetchError,
@@ -25,6 +25,7 @@ from .ngx_client import (
     fetch_market_snapshot_from_ngx,
     fetch_stock_logo,
 )
+from .push import PushDeliveryError, dispatch_portfolio_price_alerts, remove_push_token, send_push_message, upsert_push_token
 from .schemas import (
     AccountDeleteRequest,
     AccountDeletionRequestCreate,
@@ -39,6 +40,10 @@ from .schemas import (
     MessageResponse,
     PasswordChangeRequest,
     ProfileUpdate,
+    PushStatusOut,
+    PushTestRequest,
+    PushTokenDelete,
+    PushTokenUpsert,
     RegisterRequest,
     StockOut,
     StockDetailOut,
@@ -116,6 +121,14 @@ async def background_stock_sync_loop() -> None:
         try:
             await asyncio.to_thread(sync_stocks, db, False)
             await asyncio.to_thread(refresh_market_status, db)
+            if settings.push_enabled:
+                result = await asyncio.to_thread(dispatch_portfolio_price_alerts, db, settings)
+                if result["alerts_sent"]:
+                    logger.info(
+                        "Sent %s portfolio push alerts to %s device tokens",
+                        result["alerts_sent"],
+                        result["tokens_sent"],
+                    )
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -453,6 +466,34 @@ def email_portfolio_report(
     return MessageResponse(message=f"Portfolio report emailed to {user.email}.")
 
 
+@app.post("/me/push-tokens", response_model=MessageResponse)
+def register_push_token(
+    payload: PushTokenUpsert,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> MessageResponse:
+    upsert_push_token(
+        db,
+        user,
+        token=payload.token,
+        platform=payload.platform,
+        device_label=payload.device_label,
+    )
+    return MessageResponse(message="Push token registered.")
+
+
+@app.delete("/me/push-tokens", status_code=status.HTTP_204_NO_CONTENT)
+def unregister_push_token(
+    payload: PushTokenDelete,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Response:
+    removed = remove_push_token(db, user, token=payload.token)
+    if not removed:
+        raise HTTPException(status_code=404, detail="Push token not found")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @app.get("/market/status", response_model=MarketStatusOut)
 def get_market_status(db: Session = Depends(get_db), _: User = Depends(get_current_user)) -> dict:
     return get_cached_market_status(db)
@@ -640,6 +681,65 @@ def get_email_status(_: User = Depends(get_current_superuser)) -> dict:
         "has_smtp_from_email": bool(settings.smtp_from_email),
         "from_email": settings.from_email,
     }
+
+
+@app.get("/admin/push/status", response_model=PushStatusOut)
+def get_push_status(db: Session = Depends(get_db), _: User = Depends(get_current_superuser)) -> dict:
+    registered_devices = db.scalar(select(func.count()).select_from(PushDeviceToken)) or 0
+    users_with_devices = (
+        db.scalar(select(func.count(func.distinct(PushDeviceToken.user_id))).select_from(PushDeviceToken)) or 0
+    )
+    return {
+        "enabled": settings.push_enabled,
+        "project_id": settings.firebase_project_id,
+        "registered_devices": registered_devices,
+        "users_with_devices": users_with_devices,
+        "threshold_percent": settings.push_alert_threshold_percent,
+    }
+
+
+@app.post("/admin/push/test", response_model=MessageResponse)
+def send_test_push(
+    payload: PushTestRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_superuser),
+) -> MessageResponse:
+    devices = db.scalars(select(PushDeviceToken).where(PushDeviceToken.user_id == user.id)).all()
+    if not devices:
+        return MessageResponse(message="No registered push devices found for this admin account yet.")
+    if not settings.push_enabled:
+        return MessageResponse(message="Firebase push is not configured on the server yet.")
+
+    title = payload.title or "Stockfolio NG push test"
+    body = payload.body or "Push alerts are wired up. This is a test notification."
+    delivered = 0
+    invalid_devices: list[PushDeviceToken] = []
+    for device in devices:
+        try:
+            send_push_message(
+                settings,
+                token=device.token,
+                title=title,
+                body=body,
+                data={
+                    "type": "test_push",
+                    "route": "portfolio",
+                    "symbol": (payload.symbol or "").strip().upper(),
+                },
+            )
+        except PushDeliveryError as exc:
+            logger.warning("Push test delivery failed for %s: %s", device.platform, exc)
+            if "UNREGISTERED" in str(exc).upper() or "INVALID_ARGUMENT" in str(exc).upper():
+                invalid_devices.append(device)
+            continue
+        delivered += 1
+
+    for device in invalid_devices:
+        db.delete(device)
+    if invalid_devices:
+        db.commit()
+
+    return MessageResponse(message=f"Sent test push to {delivered} device(s).")
 
 
 @app.get("/admin/account-deletion-requests", response_model=list[AccountDeletionRequestOut])
