@@ -17,6 +17,8 @@ import 'stock_logo_assets.dart';
 
 final apiBaseUrl = normalizeApiBaseUrl(configuredApiBaseUrl());
 const _themeModePreferenceKey = 'theme_mode';
+const _webSessionDeadlineKey = 'web_session_deadline_ms';
+const _webSessionExtendedKey = 'web_session_extended';
 
 String stockLogoUrl(String symbol) =>
     '$apiBaseUrl/public/stocks/${Uri.encodeComponent(symbol)}/logo';
@@ -183,18 +185,36 @@ class ApiClient {
   Future<void> restoreToken() async {
     final prefs = await SharedPreferences.getInstance();
     _token = prefs.getString('access_token');
+    if (kIsWeb &&
+        _token != null &&
+        prefs.getInt(_webSessionDeadlineKey) == null) {
+      await _startWebSession(prefs);
+    }
   }
 
   Future<void> clearToken() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('access_token');
+    await prefs.remove(_webSessionDeadlineKey);
+    await prefs.remove(_webSessionExtendedKey);
     _token = null;
   }
 
   Future<void> _saveToken(String token) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('access_token', token);
+    if (kIsWeb) {
+      await _startWebSession(prefs);
+    }
     _token = token;
+  }
+
+  Future<void> _startWebSession(SharedPreferences prefs) async {
+    await prefs.setInt(
+      _webSessionDeadlineKey,
+      DateTime.now().add(const Duration(hours: 1)).millisecondsSinceEpoch,
+    );
+    await prefs.setBool(_webSessionExtendedKey, false);
   }
 
   Map<String, String> get _headers => {
@@ -620,25 +640,8 @@ String? blankToNull(String value) {
   return trimmed.isEmpty ? null : trimmed;
 }
 
-String stockPickerLabel(Stock stock) {
-  final symbol = stock.symbol.trim();
-  final rawName = stock.name?.trim() ?? '';
-  if (rawName.isEmpty) return symbol;
-
-  var cleaned = rawName;
-  final symbolPattern = RegExp(
-    '^${RegExp.escape(symbol)}\\b\\s*',
-    caseSensitive: false,
-  );
-  cleaned = cleaned.replaceFirst(symbolPattern, '').trim();
-  cleaned = cleaned.replaceAll(RegExp(r'\s+'), ' ').trim();
-
-  if (cleaned.isEmpty || cleaned.toUpperCase() == symbol.toUpperCase()) {
-    return symbol;
-  }
-
-  return '$symbol $cleaned';
-}
+String stockPickerLabel(Stock stock) =>
+    blankToNull(stock.name ?? '') ?? stock.symbol;
 
 extension StringFallback on String {
   String withFallback(String fallback) => isEmpty ? fallback : this;
@@ -2638,9 +2641,13 @@ class _DashboardShellState extends State<DashboardShell> {
       .instance
       .ensureRegistered(registerToken: widget.api.registerPushToken);
   Timer? alertTimer;
+  Timer? webSessionTimer;
   StreamSubscription<PushAlertMessage>? pushMessageSubscription;
   final Map<String, double> _lastSeenHoldingPrices = {};
   final Map<String, double> _lastAlertPrices = {};
+  DateTime? webSessionDeadline;
+  bool webSessionExtended = false;
+  bool sessionPromptOpen = false;
 
   @override
   void initState() {
@@ -2650,6 +2657,13 @@ class _DashboardShellState extends State<DashboardShell> {
       const Duration(minutes: 1),
       (_) => _checkPortfolioAlerts(),
     );
+    if (kIsWeb) {
+      Future<void>.delayed(Duration.zero, _loadWebSessionState);
+      webSessionTimer = Timer.periodic(
+        const Duration(seconds: 1),
+        (_) => _handleWebSessionTick(),
+      );
+    }
     pushMessageSubscription = PushNotifications.instance.messages.listen(
       _showPushMessage,
     );
@@ -2658,8 +2672,104 @@ class _DashboardShellState extends State<DashboardShell> {
   @override
   void dispose() {
     alertTimer?.cancel();
+    webSessionTimer?.cancel();
     pushMessageSubscription?.cancel();
     super.dispose();
+  }
+
+  Future<void> _loadWebSessionState() async {
+    if (!kIsWeb) return;
+    final prefs = await SharedPreferences.getInstance();
+    final deadlineMs = prefs.getInt(_webSessionDeadlineKey);
+    final deadline = deadlineMs == null
+        ? DateTime.now().add(const Duration(hours: 1))
+        : DateTime.fromMillisecondsSinceEpoch(deadlineMs);
+    final extended = prefs.getBool(_webSessionExtendedKey) ?? false;
+    if (deadlineMs == null) {
+      await prefs.setInt(
+        _webSessionDeadlineKey,
+        deadline.millisecondsSinceEpoch,
+      );
+      await prefs.setBool(_webSessionExtendedKey, extended);
+    }
+    if (!mounted) return;
+    setState(() {
+      webSessionDeadline = deadline;
+      webSessionExtended = extended;
+    });
+    _handleWebSessionTick();
+  }
+
+  Future<void> _handleWebSessionTick() async {
+    if (!mounted ||
+        !kIsWeb ||
+        webSessionDeadline == null ||
+        sessionPromptOpen) {
+      return;
+    }
+    final remaining = webSessionDeadline!.difference(DateTime.now());
+    if (remaining.isNegative || remaining.inSeconds == 0) {
+      if (!webSessionExtended) {
+        sessionPromptOpen = true;
+        final extend = await showDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => AlertDialog(
+            title: const Text('Session expired'),
+            content: const Text(
+              'Your web session has reached 1 hour. Extend it once for another 30 minutes?',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('Log out'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: const Text('Extend 30 mins'),
+              ),
+            ],
+          ),
+        );
+        sessionPromptOpen = false;
+        if (extend == true) {
+          final prefs = await SharedPreferences.getInstance();
+          final nextDeadline = DateTime.now().add(const Duration(minutes: 30));
+          await prefs.setInt(
+            _webSessionDeadlineKey,
+            nextDeadline.millisecondsSinceEpoch,
+          );
+          await prefs.setBool(_webSessionExtendedKey, true);
+          if (!mounted) return;
+          setState(() {
+            webSessionDeadline = nextDeadline;
+            webSessionExtended = true;
+          });
+          showMessage(context, 'Session extended for 30 minutes.');
+          return;
+        }
+      }
+      if (!mounted) return;
+      showMessage(context, 'Your web session has ended. Please sign in again.');
+      await widget.onSignOut();
+      return;
+    }
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  String? get sessionCountdownLabel {
+    if (!kIsWeb || webSessionDeadline == null) return null;
+    final remaining = webSessionDeadline!.difference(DateTime.now());
+    if (remaining.isNegative) return 'Session ending';
+    final hours = remaining.inHours;
+    final minutes = remaining.inMinutes.remainder(60);
+    final seconds = remaining.inSeconds.remainder(60);
+    if (hours > 0) {
+      return 'Session ${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+    }
+    return 'Session ${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
   }
 
   Future<void> _seedAlertBaseline() async {
@@ -2840,6 +2950,19 @@ class _DashboardShellState extends State<DashboardShell> {
               user == null ? 'NGX Portfolio' : 'Welcome, ${user.displayName}',
             ),
             actions: [
+              if (sessionCountdownLabel != null)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  child: Chip(
+                    label: Text(sessionCountdownLabel!),
+                    avatar: Icon(
+                      Icons.timer_outlined,
+                      size: 18,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                  ),
+                ),
+              const SizedBox(width: 8),
               ThemeModeButton(
                 themeMode: widget.themeMode,
                 onSelected: widget.onThemeModeChanged,
