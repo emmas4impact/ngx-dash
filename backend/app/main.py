@@ -40,6 +40,8 @@ from .schemas import (
     MarketStatusOut,
     MessageResponse,
     PasswordChangeRequest,
+    PasswordResetConfirm,
+    PasswordResetRequest,
     ProfileUpdate,
     PushStatusOut,
     PushTestRequest,
@@ -210,9 +212,12 @@ def ensure_runtime_schema() -> None:
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT false"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_token VARCHAR(128)"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_sent_at TIMESTAMPTZ"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_token VARCHAR(128)"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_sent_at TIMESTAMPTZ"))
         conn.execute(
             text("CREATE INDEX IF NOT EXISTS ix_users_email_verification_token ON users(email_verification_token)")
         )
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_users_password_reset_token ON users(password_reset_token)"))
         conn.execute(
             text(
                 """
@@ -367,6 +372,15 @@ def _verification_url(token: str) -> str:
     return f"{base_url}/?verify_email_token={token}"
 
 
+def _new_password_reset_token() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def _password_reset_url(token: str) -> str:
+    base_url = settings.frontend_base_url.rstrip("/")
+    return f"{base_url}/?reset_password_token={token}"
+
+
 @app.post("/auth/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
 def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> User:
     existing = db.scalar(select(User).where(User.email == payload.email.lower()))
@@ -407,6 +421,65 @@ def verify_email(token: str, db: Session = Depends(get_db)) -> MessageResponse:
     user.email_verification_sent_at = None
     db.commit()
     return MessageResponse(message="Email address verified.")
+
+
+@app.post("/auth/forgot-password", response_model=MessageResponse)
+def forgot_password(payload: PasswordResetRequest, db: Session = Depends(get_db)) -> MessageResponse:
+    user = db.scalar(select(User).where(User.email == payload.email.lower()))
+    generic_message = "If that email is registered, a password reset link has been sent."
+    if user is None:
+        return MessageResponse(message=generic_message)
+
+    user.password_reset_token = _new_password_reset_token()
+    user.password_reset_sent_at = datetime.now(timezone.utc)
+    db.commit()
+    reset_url = _password_reset_url(user.password_reset_token)
+
+    if not settings.email_enabled:
+        return MessageResponse(
+            message="Email is not configured yet. Password reset link generated for testing.",
+            verification_url=reset_url,
+        )
+
+    try:
+        send_email(
+            settings,
+            to_email=user.email,
+            subject="Reset your Stockfolio NG password",
+            body=(
+                f"Hello {user.full_name or user.email},\n\n"
+                "Use this link to reset your password:\n"
+                f"{reset_url}\n\n"
+                "If you did not request this, you can ignore this email."
+            ),
+        )
+    except Exception as exc:
+        logger.warning("Password reset delivery failed via %s: %s", settings.email_provider, exc)
+        return MessageResponse(message=f"Could not send reset email yet: {exc}")
+
+    return MessageResponse(message=generic_message)
+
+
+@app.post("/auth/reset-password", response_model=MessageResponse)
+def reset_password(payload: PasswordResetConfirm, db: Session = Depends(get_db)) -> MessageResponse:
+    user = db.scalar(select(User).where(User.password_reset_token == payload.token))
+    if user is None or user.password_reset_sent_at is None:
+        raise HTTPException(status_code=404, detail="Password reset link is invalid or expired")
+
+    sent_at = user.password_reset_sent_at
+    if sent_at.tzinfo is None:
+        sent_at = sent_at.replace(tzinfo=timezone.utc)
+    if datetime.now(timezone.utc) - sent_at > timedelta(hours=2):
+        user.password_reset_token = None
+        user.password_reset_sent_at = None
+        db.commit()
+        raise HTTPException(status_code=400, detail="Password reset link has expired")
+
+    user.password_hash = hash_password(payload.new_password)
+    user.password_reset_token = None
+    user.password_reset_sent_at = None
+    db.commit()
+    return MessageResponse(message="Password reset successful. You can now sign in.")
 
 
 @app.get("/me", response_model=UserOut)
@@ -650,13 +723,11 @@ def get_stock_history(
     return rows
 
 
-@app.get("/stocks/{symbol}/detail", response_model=StockDetailOut)
-def get_stock_detail(
+def build_stock_detail(
     symbol: str,
     months: int = Query(default=12, ge=1, le=120),
     news_limit: int = Query(default=6, ge=1, le=20),
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
 ) -> dict:
     stock = db.get(Stock, symbol.strip().upper())
     if stock is None:
@@ -690,6 +761,27 @@ def get_stock_detail(
         "market_snapshot": market_snapshot,
         "news": news,
     }
+
+
+@app.get("/public/stocks/{symbol}/detail", response_model=StockDetailOut, include_in_schema=False)
+def get_public_stock_detail(
+    symbol: str,
+    months: int = Query(default=12, ge=1, le=120),
+    news_limit: int = Query(default=6, ge=1, le=20),
+    db: Session = Depends(get_db),
+) -> dict:
+    return build_stock_detail(symbol, months, news_limit, db)
+
+
+@app.get("/stocks/{symbol}/detail", response_model=StockDetailOut)
+def get_stock_detail(
+    symbol: str,
+    months: int = Query(default=12, ge=1, le=120),
+    news_limit: int = Query(default=6, ge=1, le=20),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> dict:
+    return build_stock_detail(symbol, months, news_limit, db)
 
 
 @app.post("/admin/sync/stocks", response_model=SyncResult)

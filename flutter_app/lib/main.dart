@@ -16,6 +16,7 @@ import 'push_notifications.dart';
 import 'stock_logo_assets.dart';
 
 final apiBaseUrl = normalizeApiBaseUrl(configuredApiBaseUrl());
+const _themeModePreferenceKey = 'theme_mode';
 
 String stockLogoUrl(String symbol) =>
     '$apiBaseUrl/public/stocks/${Uri.encodeComponent(symbol)}/logo';
@@ -53,20 +54,42 @@ class _NgxPortfolioAppState extends State<NgxPortfolioApp> {
   bool loading = true;
   bool authenticated = false;
   late String? emailVerificationToken;
+  late String? passwordResetToken;
+  ThemeMode themeMode = ThemeMode.system;
 
   @override
   void initState() {
     super.initState();
     emailVerificationToken = Uri.base.queryParameters['verify_email_token'];
+    passwordResetToken = Uri.base.queryParameters['reset_password_token'];
     _loadToken();
   }
 
   Future<void> _loadToken() async {
+    final prefs = await SharedPreferences.getInstance();
     await api.restoreToken();
+    final savedThemeMode = prefs.getString(_themeModePreferenceKey);
     setState(() {
       authenticated = api.hasToken;
+      themeMode = switch (savedThemeMode) {
+        'light' => ThemeMode.light,
+        'dark' => ThemeMode.dark,
+        _ => ThemeMode.system,
+      };
       loading = false;
     });
+  }
+
+  Future<void> _setThemeMode(ThemeMode nextMode) async {
+    final prefs = await SharedPreferences.getInstance();
+    final value = switch (nextMode) {
+      ThemeMode.light => 'light',
+      ThemeMode.dark => 'dark',
+      ThemeMode.system => 'system',
+    };
+    await prefs.setString(_themeModePreferenceKey, value);
+    if (!mounted) return;
+    setState(() => themeMode = nextMode);
   }
 
   void _signedIn() {
@@ -86,6 +109,7 @@ class _NgxPortfolioAppState extends State<NgxPortfolioApp> {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'NGX Portfolio',
+      themeMode: themeMode,
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(
@@ -101,6 +125,21 @@ class _NgxPortfolioAppState extends State<NgxPortfolioApp> {
           ),
         ),
       ),
+      darkTheme: ThemeData(
+        useMaterial3: true,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFF0E7C66),
+          brightness: Brightness.dark,
+        ),
+        scaffoldBackgroundColor: const Color(0xFF0F1715),
+        cardTheme: const CardThemeData(
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.all(Radius.circular(8)),
+            side: BorderSide(color: Color(0xFF23403A)),
+          ),
+        ),
+      ),
       home: loading
           ? const Scaffold(body: Center(child: CircularProgressIndicator()))
           : emailVerificationToken != null
@@ -109,9 +148,25 @@ class _NgxPortfolioAppState extends State<NgxPortfolioApp> {
               token: emailVerificationToken!,
               onDone: () => setState(() => emailVerificationToken = null),
             )
+          : passwordResetToken != null
+          ? ResetPasswordScreen(
+              api: api,
+              token: passwordResetToken!,
+              onDone: () => setState(() => passwordResetToken = null),
+            )
           : authenticated
-          ? DashboardShell(api: api, onSignOut: _signOut)
-          : AuthScreen(api: api, onSignedIn: _signedIn),
+          ? DashboardShell(
+              api: api,
+              onSignOut: _signOut,
+              themeMode: themeMode,
+              onThemeModeChanged: _setThemeMode,
+            )
+          : AuthScreen(
+              api: api,
+              onSignedIn: _signedIn,
+              themeMode: themeMode,
+              onThemeModeChanged: _setThemeMode,
+            ),
     );
   }
 }
@@ -177,6 +232,33 @@ class ApiClient {
     _expect(response, 200);
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     await _saveToken(data['access_token'] as String);
+  }
+
+  Future<String> forgotPassword(String email) async {
+    final response = await _client.post(
+      _uri('/auth/forgot-password'),
+      headers: _headers,
+      body: jsonEncode({'email': email}),
+    );
+    _expect(response, 200);
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    final link = data['verification_url']?.toString();
+    final message =
+        data['message']?.toString() ??
+        'If that email is registered, a password reset link has been sent.';
+    return link == null || link.isEmpty ? message : '$message $link';
+  }
+
+  Future<String> resetPassword(String token, String newPassword) async {
+    final response = await _client.post(
+      _uri('/auth/reset-password'),
+      headers: _headers,
+      body: jsonEncode({'token': token, 'new_password': newPassword}),
+    );
+    _expect(response, 200);
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return data['message']?.toString() ??
+        'Password reset successful. You can now sign in.';
   }
 
   Future<AppUser> me() async {
@@ -346,6 +428,20 @@ class ApiClient {
   Future<StockDetailBundle> stockDetail(String symbol) async {
     final response = await _client.get(
       _uri('/stocks/$symbol/detail', {'months': '12', 'news_limit': '6'}),
+      headers: _headers,
+    );
+    _expect(response, 200);
+    return StockDetailBundle.fromJson(
+      jsonDecode(response.body) as Map<String, dynamic>,
+    );
+  }
+
+  Future<StockDetailBundle> publicStockDetail(String symbol) async {
+    final response = await _client.get(
+      _uri('/public/stocks/$symbol/detail', {
+        'months': '12',
+        'news_limit': '6',
+      }),
       headers: _headers,
     );
     _expect(response, 200);
@@ -1030,10 +1126,18 @@ final moneyFormat = NumberFormat.currency(symbol: 'NGN ', decimalDigits: 2);
 final compactFormat = NumberFormat.compact();
 
 class AuthScreen extends StatefulWidget {
-  const AuthScreen({super.key, required this.api, required this.onSignedIn});
+  const AuthScreen({
+    super.key,
+    required this.api,
+    required this.onSignedIn,
+    required this.themeMode,
+    required this.onThemeModeChanged,
+  });
 
   final ApiClient api;
   final VoidCallback onSignedIn;
+  final ThemeMode themeMode;
+  final ValueChanged<ThemeMode> onThemeModeChanged;
 
   @override
   State<AuthScreen> createState() => _AuthScreenState();
@@ -1045,6 +1149,8 @@ class _AuthScreenState extends State<AuthScreen> {
   final fullName = TextEditingController();
   bool registerMode = false;
   bool busy = false;
+  String? emailError;
+  String? passwordError;
   late Future<LandingMarketData> landingFuture = _loadLandingData();
   Timer? landingRefreshTimer;
   Timer? marketMotionTimer;
@@ -1079,7 +1185,27 @@ class _AuthScreenState extends State<AuthScreen> {
     return LandingMarketData(status: status, leaders: leaders);
   }
 
+  bool _validateAuthForm() {
+    final trimmedEmail = email.text.trim();
+    final nextEmailError = trimmedEmail.isEmpty
+        ? 'Enter a valid email.'
+        : (!RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(trimmedEmail)
+              ? 'Enter a valid email.'
+              : null);
+    final nextPasswordError = password.text.isEmpty
+        ? 'Enter your password.'
+        : (registerMode && password.text.length < 8
+              ? 'Password must be at least 8 characters.'
+              : null);
+    setState(() {
+      emailError = nextEmailError;
+      passwordError = nextPasswordError;
+    });
+    return nextEmailError == null && nextPasswordError == null;
+  }
+
   Future<void> submit() async {
+    if (!_validateAuthForm()) return;
     setState(() => busy = true);
     try {
       if (registerMode) {
@@ -1097,6 +1223,82 @@ class _AuthScreenState extends State<AuthScreen> {
     } finally {
       if (mounted) setState(() => busy = false);
     }
+  }
+
+  Future<void> _requestPasswordReset() async {
+    final controller = TextEditingController(text: email.text.trim());
+    try {
+      final result = await showDialog<String>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Reset password'),
+          content: TextField(
+            controller: controller,
+            keyboardType: TextInputType.emailAddress,
+            autofocus: true,
+            decoration: const InputDecoration(
+              labelText: 'Registered email',
+              hintText: 'name@example.com',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () =>
+                  Navigator.of(context).pop(controller.text.trim()),
+              child: const Text('Send reset link'),
+            ),
+          ],
+        ),
+      );
+      if (!mounted || result == null) return;
+      if (!RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(result)) {
+        showError(context, 'Enter a valid email address.');
+        return;
+      }
+      setState(() => busy = true);
+      final message = await widget.api.forgotPassword(result);
+      if (!mounted) return;
+      showMessage(context, message);
+    } catch (error) {
+      if (mounted) showError(context, error.toString());
+    } finally {
+      controller.dispose();
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  Future<void> _openLandingStockDetail(Stock stock) async {
+    final compact = MediaQuery.of(context).size.width < 760;
+    final content = LandingStockDetailSheet(api: widget.api, stock: stock);
+    if (compact) {
+      await showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        useSafeArea: true,
+        builder: (context) => DraggableScrollableSheet(
+          expand: false,
+          initialChildSize: 0.9,
+          maxChildSize: 0.95,
+          minChildSize: 0.65,
+          builder: (context, scrollController) => content,
+        ),
+      );
+      return;
+    }
+    await showDialog<void>(
+      context: context,
+      builder: (context) => Dialog(
+        insetPadding: const EdgeInsets.all(24),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 920, maxHeight: 760),
+          child: content,
+        ),
+      ),
+    );
   }
 
   @override
@@ -1127,10 +1329,19 @@ class _AuthScreenState extends State<AuthScreen> {
                     busy: busy,
                     fullName: fullName,
                     email: email,
+                    emailError: emailError,
+                    passwordError: passwordError,
                     password: password,
                     onSubmit: submit,
-                    onToggleMode: () =>
-                        setState(() => registerMode = !registerMode),
+                    onForgotPassword: _requestPasswordReset,
+                    onToggleMode: () => setState(() {
+                      registerMode = !registerMode;
+                      emailError = null;
+                      passwordError = null;
+                    }),
+                    onEmailChanged: (_) => setState(() => emailError = null),
+                    onPasswordChanged: (_) =>
+                        setState(() => passwordError = null),
                   );
                   final marketView = _LandingMarketView(
                     theme: theme,
@@ -1139,18 +1350,37 @@ class _AuthScreenState extends State<AuthScreen> {
                         snapshot.connectionState == ConnectionState.waiting &&
                         landing == null,
                     headlineStock: headlineStock,
+                    onOpenStock: _openLandingStockDetail,
+                  );
+                  final themeButton = Align(
+                    alignment: Alignment.centerRight,
+                    child: ThemeModeButton(
+                      themeMode: widget.themeMode,
+                      onSelected: widget.onThemeModeChanged,
+                    ),
                   );
 
                   if (isDesktop) {
-                    return Padding(
+                    return SingleChildScrollView(
                       padding: const EdgeInsets.all(20),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          SizedBox(width: 370, child: authPanel),
-                          const SizedBox(width: 20),
-                          Expanded(child: marketView),
-                        ],
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(
+                          minHeight: max(0, constraints.maxHeight - 40),
+                        ),
+                        child: Column(
+                          children: [
+                            themeButton,
+                            const SizedBox(height: 12),
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                SizedBox(width: 370, child: authPanel),
+                                const SizedBox(width: 20),
+                                Expanded(child: marketView),
+                              ],
+                            ),
+                          ],
+                        ),
                       ),
                     );
                   }
@@ -1163,6 +1393,8 @@ class _AuthScreenState extends State<AuthScreen> {
                     child: ListView(
                       padding: const EdgeInsets.all(16),
                       children: [
+                        themeButton,
+                        const SizedBox(height: 12),
                         authPanel,
                         const SizedBox(height: 16),
                         marketView,
@@ -1186,9 +1418,14 @@ class _AuthHeroPanel extends StatelessWidget {
     required this.busy,
     required this.fullName,
     required this.email,
+    required this.emailError,
     required this.password,
+    required this.passwordError,
     required this.onSubmit,
+    required this.onForgotPassword,
     required this.onToggleMode,
+    required this.onEmailChanged,
+    required this.onPasswordChanged,
   });
 
   final ThemeData theme;
@@ -1196,9 +1433,14 @@ class _AuthHeroPanel extends StatelessWidget {
   final bool busy;
   final TextEditingController fullName;
   final TextEditingController email;
+  final String? emailError;
   final TextEditingController password;
+  final String? passwordError;
   final Future<void> Function() onSubmit;
+  final Future<void> Function() onForgotPassword;
   final VoidCallback onToggleMode;
+  final ValueChanged<String> onEmailChanged;
+  final ValueChanged<String> onPasswordChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -1288,18 +1530,21 @@ class _AuthHeroPanel extends StatelessWidget {
                   TextField(
                     controller: email,
                     keyboardType: TextInputType.emailAddress,
+                    onChanged: onEmailChanged,
                     autofillHints: registerMode
                         ? const [AutofillHints.newUsername, AutofillHints.email]
                         : const [AutofillHints.username, AutofillHints.email],
-                    decoration: const InputDecoration(
-                      prefixIcon: Icon(Icons.mail_outline),
+                    decoration: InputDecoration(
+                      prefixIcon: const Icon(Icons.mail_outline),
                       labelText: 'Email',
+                      errorText: emailError,
                     ),
                   ),
                   const SizedBox(height: 12),
                   TextField(
                     controller: password,
                     obscureText: true,
+                    onChanged: onPasswordChanged,
                     autofillHints: registerMode
                         ? const [AutofillHints.newPassword]
                         : const [AutofillHints.password],
@@ -1308,9 +1553,10 @@ class _AuthHeroPanel extends StatelessWidget {
                         onSubmit();
                       }
                     },
-                    decoration: const InputDecoration(
-                      prefixIcon: Icon(Icons.lock_outline),
+                    decoration: InputDecoration(
+                      prefixIcon: const Icon(Icons.lock_outline),
                       labelText: 'Password',
+                      errorText: passwordError,
                     ),
                   ),
                 ],
@@ -1338,15 +1584,29 @@ class _AuthHeroPanel extends StatelessWidget {
               ),
             ],
             const SizedBox(height: 20),
-            FilledButton.icon(
-              onPressed: busy ? null : onSubmit,
-              icon: busy
-                  ? const SizedBox.square(
-                      dimension: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : Icon(registerMode ? Icons.person_add_alt_1 : Icons.login),
-              label: Text(registerMode ? 'Create account' : 'Sign in'),
+            Wrap(
+              spacing: 12,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                FilledButton.icon(
+                  onPressed: busy ? null : onSubmit,
+                  icon: busy
+                      ? const SizedBox.square(
+                          dimension: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : Icon(
+                          registerMode ? Icons.person_add_alt_1 : Icons.login,
+                        ),
+                  label: Text(registerMode ? 'Create account' : 'Sign in'),
+                ),
+                if (!registerMode)
+                  TextButton(
+                    onPressed: busy ? null : onForgotPassword,
+                    child: const Text('Forgot password?'),
+                  ),
+              ],
             ),
             Align(
               alignment: Alignment.centerLeft,
@@ -1370,12 +1630,14 @@ class _LandingMarketView extends StatelessWidget {
     required this.landing,
     required this.loading,
     required this.headlineStock,
+    required this.onOpenStock,
   });
 
   final ThemeData theme;
   final LandingMarketData? landing;
   final bool loading;
   final Stock? headlineStock;
+  final ValueChanged<Stock> onOpenStock;
 
   @override
   Widget build(BuildContext context) {
@@ -1448,7 +1710,10 @@ class _LandingMarketView extends StatelessWidget {
               if (loading)
                 const LinearProgressIndicator()
               else if (headlineStock != null)
-                _LandingHeadlineCard(stock: headlineStock!),
+                _LandingHeadlineCard(
+                  stock: headlineStock!,
+                  onTap: () => onOpenStock(headlineStock!),
+                ),
             ],
           ),
         ),
@@ -1497,6 +1762,7 @@ class _LandingMarketView extends StatelessWidget {
                   icon: Icons.local_fire_department_outlined,
                   stocks: movers,
                   positive: true,
+                  onStockTap: onOpenStock,
                 ),
                 const SizedBox(height: 12),
                 MarketLeaderPanel(
@@ -1504,6 +1770,7 @@ class _LandingMarketView extends StatelessWidget {
                   icon: Icons.trending_down_outlined,
                   stocks: losers,
                   positive: false,
+                  onStockTap: onOpenStock,
                 ),
               ],
             );
@@ -1530,9 +1797,10 @@ class _LandingMarketView extends StatelessWidget {
 }
 
 class _LandingHeadlineCard extends StatelessWidget {
-  const _LandingHeadlineCard({required this.stock});
+  const _LandingHeadlineCard({required this.stock, required this.onTap});
 
   final Stock stock;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -1540,24 +1808,52 @@ class _LandingHeadlineCard extends StatelessWidget {
     final accent = positive ? const Color(0xFF5ED19B) : const Color(0xFFFFB4B4);
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 500),
-      child: Container(
+      child: InkWell(
         key: ValueKey(stock.symbol),
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
-        ),
-        child: Row(
-          children: [
-            CompanyLogo(symbol: stock.symbol, size: 46),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+          ),
+          child: Row(
+            children: [
+              CompanyLogo(symbol: stock.symbol, size: 46),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      stock.symbol,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 18,
+                      ),
+                    ),
+                    Text(
+                      stock.name ?? stock.symbol,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.72),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Text(
-                    stock.symbol,
+                    stock.lastPrice == null
+                        ? 'No price'
+                        : moneyFormat.format(stock.lastPrice),
                     style: const TextStyle(
                       color: Colors.white,
                       fontWeight: FontWeight.w700,
@@ -1565,36 +1861,16 @@ class _LandingHeadlineCard extends StatelessWidget {
                     ),
                   ),
                   Text(
-                    stock.name ?? stock.symbol,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                    '${stock.percentChange?.toStringAsFixed(2) ?? '0.00'}%',
                     style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.72),
+                      color: accent,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
                 ],
               ),
-            ),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Text(
-                  stock.lastPrice == null
-                      ? 'No price'
-                      : moneyFormat.format(stock.lastPrice),
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 18,
-                  ),
-                ),
-                Text(
-                  '${stock.percentChange?.toStringAsFixed(2) ?? '0.00'}%',
-                  style: TextStyle(color: accent, fontWeight: FontWeight.w700),
-                ),
-              ],
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -1660,131 +1936,143 @@ class _LandingPulseChart extends StatelessWidget {
     final maxY = allY.reduce(max);
     final padding = max(0.5, (maxY - minY) * 0.16);
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('Market pulse', style: Theme.of(context).textTheme.titleLarge),
-        const SizedBox(height: 6),
-        Text(
-          'A live-style view built from today’s opening price versus current market price.',
-          style: Theme.of(context).textTheme.bodyMedium,
-        ),
-        const SizedBox(height: 16),
-        SizedBox(
-          height: 230,
-          child: LineChart(
-            LineChartData(
-              minX: 0,
-              maxX: 9,
-              minY: minY - padding,
-              maxY: maxY + padding,
-              borderData: FlBorderData(show: false),
-              gridData: FlGridData(
-                show: true,
-                drawVerticalLine: false,
-                getDrawingHorizontalLine: (_) =>
-                    FlLine(color: const Color(0xFFE2E8E6), strokeWidth: 1),
-              ),
-              titlesData: FlTitlesData(
-                topTitles: const AxisTitles(
-                  sideTitles: SideTitles(showTitles: false),
-                ),
-                rightTitles: const AxisTitles(
-                  sideTitles: SideTitles(showTitles: false),
-                ),
-                bottomTitles: AxisTitles(
-                  sideTitles: SideTitles(
-                    showTitles: true,
-                    reservedSize: 28,
-                    getTitlesWidget: (value, meta) {
-                      final labels = [
-                        'Open',
-                        '',
-                        '',
-                        'Noon',
-                        '',
-                        '',
-                        '',
-                        '',
-                        '',
-                        'Now',
-                      ];
-                      final index = value.round();
-                      if (index < 0 ||
-                          index >= labels.length ||
-                          labels[index].isEmpty) {
-                        return const SizedBox.shrink();
-                      }
-                      return Padding(
-                        padding: const EdgeInsets.only(top: 8),
-                        child: Text(labels[index]),
-                      );
-                    },
-                  ),
-                ),
-                leftTitles: AxisTitles(
-                  sideTitles: SideTitles(
-                    showTitles: true,
-                    reservedSize: 58,
-                    getTitlesWidget: (value, meta) => Text(
-                      NumberFormat.compactCurrency(
-                        symbol: 'NGN ',
-                      ).format(value),
-                    ),
-                  ),
-                ),
-              ),
-              lineBarsData: [
-                for (final line in lines)
-                  LineChartBarData(
-                    spots: line.spots,
-                    isCurved: true,
-                    barWidth: 3,
-                    color: line.color,
-                    dotData: const FlDotData(show: false),
-                  ),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 14),
-        Wrap(
-          spacing: 12,
-          runSpacing: 10,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 640;
+        final labels = compact
+            ? {0: 'Open', 9: 'Now'}
+            : {0: 'Open', 4: 'Noon', 9: 'Now'};
+        String axisLabel(double value) {
+          if (value >= 1000) {
+            return '₦${compactFormat.format(value)}';
+          }
+          return value >= 10
+              ? '₦${value.toStringAsFixed(0)}'
+              : '₦${value.toStringAsFixed(2)}';
+        }
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            for (final line in lines)
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 10,
-                ),
-                decoration: BoxDecoration(
-                  color: line.color.withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: line.color.withValues(alpha: 0.18)),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      width: 10,
-                      height: 10,
-                      decoration: BoxDecoration(
-                        color: line.color,
-                        shape: BoxShape.circle,
+            Text('Market pulse', style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 6),
+            Text(
+              'A live-style view built from today’s opening price versus current market price.',
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 16),
+            SizedBox(
+              height: compact ? 250 : 230,
+              child: LineChart(
+                LineChartData(
+                  minX: 0,
+                  maxX: 9,
+                  minY: minY - padding,
+                  maxY: maxY + padding,
+                  borderData: FlBorderData(show: false),
+                  gridData: FlGridData(
+                    show: true,
+                    drawVerticalLine: false,
+                    getDrawingHorizontalLine: (_) =>
+                        FlLine(color: const Color(0xFFE2E8E6), strokeWidth: 1),
+                  ),
+                  titlesData: FlTitlesData(
+                    topTitles: const AxisTitles(
+                      sideTitles: SideTitles(showTitles: false),
+                    ),
+                    rightTitles: const AxisTitles(
+                      sideTitles: SideTitles(showTitles: false),
+                    ),
+                    bottomTitles: AxisTitles(
+                      sideTitles: SideTitles(
+                        showTitles: true,
+                        reservedSize: 30,
+                        getTitlesWidget: (value, meta) {
+                          final index = value.round();
+                          if ((value - index).abs() > 0.05 ||
+                              !labels.containsKey(index)) {
+                            return const SizedBox.shrink();
+                          }
+                          return Padding(
+                            padding: const EdgeInsets.only(top: 8),
+                            child: Text(labels[index]!),
+                          );
+                        },
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    Text(
-                      '${line.stock.symbol} ${line.stock.percentChange?.toStringAsFixed(2) ?? '0.00'}%',
-                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    leftTitles: AxisTitles(
+                      sideTitles: SideTitles(
+                        showTitles: true,
+                        reservedSize: compact ? 50 : 60,
+                        getTitlesWidget: (value, meta) => Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: Text(
+                            axisLabel(value),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ),
                     ),
+                  ),
+                  lineBarsData: [
+                    for (final line in lines)
+                      LineChartBarData(
+                        spots: line.spots,
+                        isCurved: true,
+                        barWidth: 3,
+                        color: line.color,
+                        dotData: const FlDotData(show: false),
+                      ),
                   ],
                 ),
               ),
+            ),
+            const SizedBox(height: 14),
+            Wrap(
+              spacing: 12,
+              runSpacing: 10,
+              children: [
+                for (final line in lines)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
+                    decoration: BoxDecoration(
+                      color: line.color.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: line.color.withValues(alpha: 0.18),
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 10,
+                          height: 10,
+                          decoration: BoxDecoration(
+                            color: line.color,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Flexible(
+                          child: Text(
+                            '${line.stock.symbol} ${line.stock.percentChange?.toStringAsFixed(2) ?? '0.00'}%',
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
           ],
-        ),
-      ],
+        );
+      },
     );
   }
 }
@@ -1966,11 +2254,326 @@ class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
   }
 }
 
+class ResetPasswordScreen extends StatefulWidget {
+  const ResetPasswordScreen({
+    super.key,
+    required this.api,
+    required this.token,
+    required this.onDone,
+  });
+
+  final ApiClient api;
+  final String token;
+  final VoidCallback onDone;
+
+  @override
+  State<ResetPasswordScreen> createState() => _ResetPasswordScreenState();
+}
+
+class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
+  final password = TextEditingController();
+  final confirmPassword = TextEditingController();
+  bool busy = false;
+  String? passwordError;
+  String? confirmError;
+
+  @override
+  void dispose() {
+    password.dispose();
+    confirmPassword.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final nextPasswordError = password.text.length < 8
+        ? 'Password must be at least 8 characters.'
+        : null;
+    final nextConfirmError = confirmPassword.text != password.text
+        ? 'Passwords do not match.'
+        : null;
+    setState(() {
+      passwordError = nextPasswordError;
+      confirmError = nextConfirmError;
+    });
+    if (nextPasswordError != null || nextConfirmError != null) return;
+
+    setState(() => busy = true);
+    try {
+      final message = await widget.api.resetPassword(
+        widget.token,
+        password.text,
+      );
+      if (!mounted) return;
+      showMessage(context, message);
+      widget.onDone();
+    } catch (error) {
+      if (mounted) showError(context, error.toString());
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: Card(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Reset password',
+                    style: Theme.of(context).textTheme.headlineSmall,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Choose a new password for your Stockfolio NG account.',
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: password,
+                    obscureText: true,
+                    decoration: InputDecoration(
+                      labelText: 'New password',
+                      errorText: passwordError,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: confirmPassword,
+                    obscureText: true,
+                    onSubmitted: (_) => busy ? null : _submit(),
+                    decoration: InputDecoration(
+                      labelText: 'Confirm password',
+                      errorText: confirmError,
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  Row(
+                    children: [
+                      FilledButton.icon(
+                        onPressed: busy ? null : _submit,
+                        icon: busy
+                            ? const SizedBox.square(
+                                dimension: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.lock_reset),
+                        label: const Text('Reset password'),
+                      ),
+                      const SizedBox(width: 12),
+                      TextButton(
+                        onPressed: busy ? null : widget.onDone,
+                        child: const Text('Back to sign in'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class ThemeModeButton extends StatelessWidget {
+  const ThemeModeButton({
+    super.key,
+    required this.themeMode,
+    required this.onSelected,
+  });
+
+  final ThemeMode themeMode;
+  final ValueChanged<ThemeMode> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return PopupMenuButton<ThemeMode>(
+      tooltip: 'Theme',
+      initialValue: themeMode,
+      onSelected: onSelected,
+      icon: const Icon(Icons.brightness_6_outlined),
+      itemBuilder: (context) => const [
+        PopupMenuItem(value: ThemeMode.system, child: Text('System default')),
+        PopupMenuItem(value: ThemeMode.light, child: Text('Light')),
+        PopupMenuItem(value: ThemeMode.dark, child: Text('Dark')),
+      ],
+    );
+  }
+}
+
+class LandingStockDetailSheet extends StatelessWidget {
+  const LandingStockDetailSheet({
+    super.key,
+    required this.api,
+    required this.stock,
+  });
+
+  final ApiClient api;
+  final Stock stock;
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<StockDetailBundle>(
+      future: api.publicStockDetail(stock.symbol),
+      builder: (context, snapshot) {
+        final detail = snapshot.data;
+        final resolvedStock = detail?.stock ?? stock;
+        final points = detail?.history ?? [];
+        final latest = points.isEmpty ? null : points.last;
+        final marketSnapshot = detail?.marketSnapshot;
+        final news = detail?.news ?? [];
+        final loading = snapshot.connectionState == ConnectionState.waiting;
+
+        return Material(
+          color: Theme.of(context).scaffoldBackgroundColor,
+          child: SafeArea(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      CompanyLogo(symbol: resolvedStock.symbol, size: 42),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              resolvedStock.symbol,
+                              style: Theme.of(context).textTheme.titleLarge,
+                            ),
+                            Text(
+                              resolvedStock.name ?? resolvedStock.symbol,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Close',
+                        onPressed: () => Navigator.of(context).maybePop(),
+                        icon: const Icon(Icons.close),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    height: 240,
+                    child: loading
+                        ? const Center(child: CircularProgressIndicator())
+                        : points.isEmpty
+                        ? const EmptyState(
+                            icon: Icons.show_chart,
+                            text: 'No chart data available yet.',
+                          )
+                        : PriceChart(points: points),
+                  ),
+                  const SizedBox(height: 16),
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: [
+                      StockDetailValue(
+                        label: 'Current',
+                        value: resolvedStock.lastPrice == null
+                            ? 'Not available'
+                            : moneyFormat.format(resolvedStock.lastPrice),
+                      ),
+                      StockDetailValue(
+                        label: 'Opening',
+                        value: latest == null
+                            ? 'Not available'
+                            : moneyFormat.format(latest.open),
+                      ),
+                      StockDetailValue(
+                        label: 'Closing',
+                        value: latest == null
+                            ? 'Not available'
+                            : moneyFormat.format(latest.close),
+                      ),
+                      StockDetailValue(
+                        label: 'Volume',
+                        value: resolvedStock.volume == null
+                            ? 'Not available'
+                            : compactFormat.format(resolvedStock.volume),
+                      ),
+                      StockDetailValue(
+                        label: 'Market cap',
+                        value: resolvedStock.marketCap == null
+                            ? 'Not available'
+                            : moneyFormat.format(resolvedStock.marketCap),
+                      ),
+                      StockDetailValue(
+                        label: 'Margin',
+                        value: resolvedStock.margin == null
+                            ? 'Not available'
+                            : '${resolvedStock.margin!.toStringAsFixed(2)}%',
+                      ),
+                      StockDetailValue(
+                        label: 'ASI',
+                        value: marketSnapshot?.asi == null
+                            ? 'Not available'
+                            : compactFormat.format(marketSnapshot!.asi),
+                      ),
+                      StockDetailValue(
+                        label: 'Deals',
+                        value: marketSnapshot?.deals == null
+                            ? 'Not available'
+                            : compactFormat.format(marketSnapshot!.deals),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 18),
+                  Text(
+                    'Company updates',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 8),
+                  if (news.isEmpty)
+                    Text(
+                      loading
+                          ? 'Loading updates...'
+                          : 'No recent updates available.',
+                    )
+                  else
+                    ...news.map((item) => CompanyNewsTile(item: item)),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
 class DashboardShell extends StatefulWidget {
-  const DashboardShell({super.key, required this.api, required this.onSignOut});
+  const DashboardShell({
+    super.key,
+    required this.api,
+    required this.onSignOut,
+    required this.themeMode,
+    required this.onThemeModeChanged,
+  });
 
   final ApiClient api;
   final Future<void> Function() onSignOut;
+  final ThemeMode themeMode;
+  final ValueChanged<ThemeMode> onThemeModeChanged;
 
   @override
   State<DashboardShell> createState() => _DashboardShellState();
@@ -2186,6 +2789,10 @@ class _DashboardShellState extends State<DashboardShell> {
               user == null ? 'NGX Portfolio' : 'Welcome, ${user.displayName}',
             ),
             actions: [
+              ThemeModeButton(
+                themeMode: widget.themeMode,
+                onSelected: widget.onThemeModeChanged,
+              ),
               IconButton(
                 tooltip: 'Sign out',
                 onPressed: widget.onSignOut,
@@ -4739,12 +5346,14 @@ class MarketLeaderPanel extends StatelessWidget {
     required this.icon,
     required this.stocks,
     required this.positive,
+    this.onStockTap,
   });
 
   final String title;
   final IconData icon;
   final List<Stock> stocks;
   final bool positive;
+  final ValueChanged<Stock>? onStockTap;
 
   @override
   Widget build(BuildContext context) {
@@ -4768,6 +5377,7 @@ class MarketLeaderPanel extends StatelessWidget {
             else
               ...stocks.map(
                 (stock) => ListTile(
+                  onTap: onStockTap == null ? null : () => onStockTap!(stock),
                   contentPadding: EdgeInsets.zero,
                   dense: true,
                   leading: CompanyLogo(symbol: stock.symbol, size: 34),
