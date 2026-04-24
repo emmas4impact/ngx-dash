@@ -33,6 +33,7 @@ from .schemas import (
     HoldingOut,
     HoldingUpsert,
     LoginRequest,
+    MarketLeadersOut,
     MarketSnapshotOut,
     MarketStatusOut,
     MessageResponse,
@@ -464,6 +465,30 @@ def get_market_snapshot(_: User = Depends(get_current_user)) -> dict:
     except NgxFetchError as exc:
         logger.warning("Market snapshot fetch failed: %s", exc)
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.get("/market/leaders", response_model=MarketLeadersOut)
+def get_market_leaders(
+    limit: int = Query(default=5, ge=1, le=20),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> dict:
+    mover_query = (
+        select(Stock)
+        .where(Stock.percent_change.is_not(None))
+        .order_by(Stock.percent_change.desc(), Stock.symbol)
+        .limit(limit)
+    )
+    loser_query = (
+        select(Stock)
+        .where(Stock.percent_change.is_not(None))
+        .order_by(Stock.percent_change.asc(), Stock.symbol)
+        .limit(limit)
+    )
+    return {
+        "top_movers": list(db.scalars(mover_query).all()),
+        "top_losers": list(db.scalars(loser_query).all()),
+    }
 
 
 @app.get("/stocks", response_model=list[StockOut])
