@@ -406,6 +406,17 @@ class ApiClient {
     );
   }
 
+  Future<MarketLeaders> marketLeaders({int limit = 5}) async {
+    final response = await _client.get(
+      _uri('/market/leaders', {'limit': '$limit'}),
+      headers: _headers,
+    );
+    _expect(response, 200);
+    return MarketLeaders.fromJson(
+      jsonDecode(response.body) as Map<String, dynamic>,
+    );
+  }
+
   Future<List<CompanyNewsItem>> companyNews(String symbol) async {
     final response = await _client.get(
       _uri('/stocks/$symbol/company-news', {'limit': '5'}),
@@ -757,6 +768,26 @@ class MarketSnapshot {
       marketCap: asDouble(json['market_cap']),
       bondCap: asDouble(json['bond_cap']),
       etfCap: asDouble(json['etf_cap']),
+    );
+  }
+}
+
+class MarketLeaders {
+  MarketLeaders({required this.topMovers, required this.topLosers});
+
+  final List<Stock> topMovers;
+  final List<Stock> topLosers;
+
+  factory MarketLeaders.fromJson(Map<String, dynamic> json) {
+    final movers = json['top_movers'] as List<dynamic>? ?? const [];
+    final losers = json['top_losers'] as List<dynamic>? ?? const [];
+    return MarketLeaders(
+      topMovers: movers
+          .map((item) => Stock.fromJson(item as Map<String, dynamic>))
+          .toList(),
+      topLosers: losers
+          .map((item) => Stock.fromJson(item as Map<String, dynamic>))
+          .toList(),
     );
   }
 }
@@ -1115,6 +1146,100 @@ class _DashboardShellState extends State<DashboardShell> {
   int index = 0;
   late Future<AppUser> userFuture = widget.api.me();
   late final Future<PackageInfo> packageInfoFuture = PackageInfo.fromPlatform();
+  Timer? alertTimer;
+  final Map<String, double> _lastSeenHoldingPrices = {};
+  final Map<String, double> _lastAlertPrices = {};
+
+  @override
+  void initState() {
+    super.initState();
+    Future<void>.delayed(Duration.zero, _seedAlertBaseline);
+    alertTimer = Timer.periodic(
+      const Duration(minutes: 1),
+      (_) => _checkPortfolioAlerts(),
+    );
+  }
+
+  @override
+  void dispose() {
+    alertTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _seedAlertBaseline() async {
+    try {
+      final holdings = await widget.api.holdings();
+      for (final holding in holdings) {
+        final currentPrice = holding.currentPrice;
+        if (currentPrice != null && currentPrice > 0) {
+          _lastSeenHoldingPrices[holding.symbol] = currentPrice;
+        }
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _checkPortfolioAlerts() async {
+    if (!mounted) return;
+    try {
+      final holdings = await widget.api.holdings();
+      final activeSymbols = holdings.map((holding) => holding.symbol).toSet();
+      _lastSeenHoldingPrices.removeWhere(
+        (symbol, _) => !activeSymbols.contains(symbol),
+      );
+      _lastAlertPrices.removeWhere(
+        (symbol, _) => !activeSymbols.contains(symbol),
+      );
+
+      Holding? alertHolding;
+      double? alertChange;
+
+      for (final holding in holdings) {
+        final currentPrice = holding.currentPrice;
+        if (currentPrice == null || currentPrice <= 0) continue;
+
+        final previousPrice = _lastSeenHoldingPrices[holding.symbol];
+        final lastAlertPrice = _lastAlertPrices[holding.symbol];
+        if (previousPrice != null && previousPrice > 0) {
+          final change = (currentPrice - previousPrice) / previousPrice;
+          final alreadyAlertedAtBand =
+              lastAlertPrice != null &&
+              lastAlertPrice > 0 &&
+              ((currentPrice - lastAlertPrice).abs() / lastAlertPrice) < 0.05;
+          if (change.abs() >= 0.05 && !alreadyAlertedAtBand) {
+            if (alertHolding == null ||
+                change.abs() > (alertChange?.abs() ?? 0)) {
+              alertHolding = holding;
+              alertChange = change;
+            }
+          }
+        }
+
+        _lastSeenHoldingPrices[holding.symbol] = currentPrice;
+      }
+
+      if (!mounted || alertHolding == null || alertChange == null) return;
+
+      _lastAlertPrices[alertHolding.symbol] = alertHolding.currentPrice!;
+      final directionText = alertChange >= 0
+          ? 'is on fire today'
+          : 'is sliding today';
+      final movePercent = (alertChange.abs() * 100).toStringAsFixed(2);
+      final priceText = moneyFormat.format(alertHolding.currentPrice);
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(
+              '${alertHolding.symbol} $directionText. Move: $movePercent%. Current price: $priceText',
+            ),
+            action: SnackBarAction(
+              label: 'Portfolio',
+              onPressed: () => setState(() => index = 1),
+            ),
+          ),
+        );
+    } catch (_) {}
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1305,105 +1430,188 @@ class VersionLabel extends StatelessWidget {
   }
 }
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key, required this.user, required this.api});
 
   final AppUser? user;
   final ApiClient api;
 
   @override
-  Widget build(BuildContext context) {
-    return FutureBuilder<List<Holding>>(
-      future: api.holdings(),
-      builder: (context, snapshot) {
-        final holdings = snapshot.data ?? [];
-        final totalValue = holdings.fold<double>(
-          0,
-          (sum, item) => sum + item.totalValue,
-        );
-        final totalCost = holdings.fold<double>(
-          0,
-          (sum, item) => sum + item.totalCost,
-        );
-        final profitLoss = totalValue - totalCost;
+  State<HomeScreen> createState() => _HomeScreenState();
+}
 
-        return ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            Text(
-              'Welcome, ${user?.displayName ?? 'investor'}',
-              style: Theme.of(context).textTheme.headlineSmall,
-            ),
-            const SizedBox(height: 4),
-            Text(
-              user?.email ?? '',
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-            const SizedBox(height: 16),
-            Wrap(
-              spacing: 12,
-              runSpacing: 12,
-              children: [
-                MetricCard(
-                  label: 'Portfolio value',
-                  value: moneyFormat.format(totalValue),
-                  icon: Icons.payments,
-                ),
-                MetricCard(
-                  label: 'Holdings',
-                  value: holdings.length.toString(),
-                  icon: Icons.pie_chart_outline,
-                ),
-                MetricCard(
-                  label: 'Profit / loss',
-                  value: moneyFormat.format(profitLoss),
-                  icon: profitLoss >= 0
-                      ? Icons.trending_up
-                      : Icons.trending_down,
-                  positive: profitLoss >= 0,
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Profile',
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                    const SizedBox(height: 8),
-                    ProfileLine(
-                      icon: Icons.verified_user_outlined,
-                      label: 'Email status',
-                      value: user?.emailVerified == true
-                          ? 'Verified'
-                          : 'Not verified',
-                    ),
-                    ProfileLine(
-                      icon: Icons.phone_outlined,
-                      label: 'Phone',
-                      value: user?.phone ?? 'Not set',
-                    ),
-                    ProfileLine(
-                      icon: Icons.location_on_outlined,
-                      label: 'Location',
-                      value: [user?.city, user?.country]
-                          .whereType<String>()
-                          .where((value) => value.isNotEmpty)
-                          .join(', ')
-                          .withFallback('Not set'),
-                    ),
-                  ],
+class _HomeScreenState extends State<HomeScreen> {
+  late Future<List<Holding>> holdingsFuture = widget.api.holdings();
+  late Future<MarketLeaders> leadersFuture = widget.api.marketLeaders();
+  Timer? refreshTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    refreshTimer = Timer.periodic(const Duration(minutes: 15), (_) {
+      if (mounted) refresh();
+    });
+  }
+
+  @override
+  void dispose() {
+    refreshTimer?.cancel();
+    super.dispose();
+  }
+
+  void refresh() {
+    setState(() {
+      holdingsFuture = widget.api.holdings();
+      leadersFuture = widget.api.marketLeaders();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return RefreshIndicator(
+      onRefresh: () async => refresh(),
+      child: FutureBuilder<List<Holding>>(
+        future: holdingsFuture,
+        builder: (context, snapshot) {
+          final holdings = snapshot.data ?? [];
+          final totalValue = holdings.fold<double>(
+            0,
+            (sum, item) => sum + item.totalValue,
+          );
+          final totalCost = holdings.fold<double>(
+            0,
+            (sum, item) => sum + item.totalCost,
+          );
+          final profitLoss = totalValue - totalCost;
+
+          return ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              Text(
+                'Welcome, ${widget.user?.displayName ?? 'investor'}',
+                style: Theme.of(context).textTheme.headlineSmall,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                widget.user?.email ?? '',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              const SizedBox(height: 16),
+              Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                children: [
+                  MetricCard(
+                    label: 'Portfolio value',
+                    value: moneyFormat.format(totalValue),
+                    icon: Icons.payments,
+                  ),
+                  MetricCard(
+                    label: 'Holdings',
+                    value: holdings.length.toString(),
+                    icon: Icons.pie_chart_outline,
+                  ),
+                  MetricCard(
+                    label: 'Profit / loss',
+                    value: moneyFormat.format(profitLoss),
+                    icon: profitLoss >= 0
+                        ? Icons.trending_up
+                        : Icons.trending_down,
+                    positive: profitLoss >= 0,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              FutureBuilder<MarketLeaders>(
+                future: leadersFuture,
+                builder: (context, leadersSnapshot) {
+                  final leaders = leadersSnapshot.data;
+                  if (leaders == null &&
+                      leadersSnapshot.connectionState ==
+                          ConnectionState.waiting) {
+                    return const Card(
+                      child: Padding(
+                        padding: EdgeInsets.all(16),
+                        child: LinearProgressIndicator(),
+                      ),
+                    );
+                  }
+                  return LayoutBuilder(
+                    builder: (context, constraints) {
+                      final moversPanel = MarketLeaderPanel(
+                        title: 'Top movers',
+                        icon: Icons.local_fire_department_outlined,
+                        stocks: leaders?.topMovers ?? const [],
+                        positive: true,
+                      );
+                      final losersPanel = MarketLeaderPanel(
+                        title: 'Top losers',
+                        icon: Icons.trending_down_outlined,
+                        stocks: leaders?.topLosers ?? const [],
+                        positive: false,
+                      );
+                      if (constraints.maxWidth >= 900) {
+                        return Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(child: moversPanel),
+                            const SizedBox(width: 12),
+                            Expanded(child: losersPanel),
+                          ],
+                        );
+                      }
+                      return Column(
+                        children: [
+                          moversPanel,
+                          const SizedBox(height: 12),
+                          losersPanel,
+                        ],
+                      );
+                    },
+                  );
+                },
+              ),
+              const SizedBox(height: 16),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Profile',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      const SizedBox(height: 8),
+                      ProfileLine(
+                        icon: Icons.verified_user_outlined,
+                        label: 'Email status',
+                        value: widget.user?.emailVerified == true
+                            ? 'Verified'
+                            : 'Not verified',
+                      ),
+                      ProfileLine(
+                        icon: Icons.phone_outlined,
+                        label: 'Phone',
+                        value: widget.user?.phone ?? 'Not set',
+                      ),
+                      ProfileLine(
+                        icon: Icons.location_on_outlined,
+                        label: 'Location',
+                        value: [widget.user?.city, widget.user?.country]
+                            .whereType<String>()
+                            .where((value) => value.isNotEmpty)
+                            .join(', ')
+                            .withFallback('Not set'),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ),
-          ],
-        );
-      },
+            ],
+          );
+        },
+      ),
     );
   }
 }
@@ -3506,6 +3714,74 @@ class MetricCard extends StatelessWidget {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class MarketLeaderPanel extends StatelessWidget {
+  const MarketLeaderPanel({
+    super.key,
+    required this.title,
+    required this.icon,
+    required this.stocks,
+    required this.positive,
+  });
+
+  final String title;
+  final IconData icon;
+  final List<Stock> stocks;
+  final bool positive;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = positive ? Colors.green.shade700 : Colors.red.shade700;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(icon, color: color),
+                const SizedBox(width: 10),
+                Text(title, style: Theme.of(context).textTheme.titleMedium),
+              ],
+            ),
+            const SizedBox(height: 12),
+            if (stocks.isEmpty)
+              const Text('No market leaders available yet.')
+            else
+              ...stocks.map(
+                (stock) => ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  leading: CompanyLogo(symbol: stock.symbol, size: 34),
+                  title: Text(stock.symbol),
+                  subtitle: Text(stock.name ?? stock.symbol),
+                  trailing: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(
+                        stock.lastPrice == null
+                            ? 'No price'
+                            : moneyFormat.format(stock.lastPrice),
+                      ),
+                      Text(
+                        '${stock.percentChange?.toStringAsFixed(2) ?? '0.00'}%',
+                        style: TextStyle(
+                          color: color,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
         ),
       ),
     );

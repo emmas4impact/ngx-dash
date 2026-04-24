@@ -175,6 +175,11 @@ class StockDetailOut(BaseModel):
     news: list[CompanyNewsOut] = []
 
 
+class MarketLeadersOut(BaseModel):
+    top_movers: list[StockOut]
+    top_losers: list[StockOut]
+
+
 class AccountDeletionRequestCreate(BaseModel):
     email: EmailStr
     reason: str | None = Field(default=None, max_length=2000)
