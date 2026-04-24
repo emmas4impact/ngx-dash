@@ -1152,6 +1152,7 @@ class _AuthScreenState extends State<AuthScreen> {
   String? emailError;
   String? passwordError;
   late Future<LandingMarketData> landingFuture = _loadLandingData();
+  late final Future<PackageInfo> packageInfoFuture = PackageInfo.fromPlatform();
   Timer? landingRefreshTimer;
   Timer? marketMotionTimer;
   int marketHeadlineIndex = 0;
@@ -1318,7 +1319,7 @@ class _AuthScreenState extends State<AuthScreen> {
               : combinedLeaders[marketHeadlineIndex % combinedLeaders.length];
 
           return Container(
-            decoration: const BoxDecoration(color: Color(0xFFF5F8F7)),
+            decoration: BoxDecoration(color: theme.scaffoldBackgroundColor),
             child: SafeArea(
               child: LayoutBuilder(
                 builder: (context, constraints) {
@@ -1359,6 +1360,19 @@ class _AuthScreenState extends State<AuthScreen> {
                       onSelected: widget.onThemeModeChanged,
                     ),
                   );
+                  final footer = Column(
+                    children: [
+                      const SizedBox(height: 18),
+                      VersionLabel(packageInfoFuture: packageInfoFuture),
+                      Text(
+                        'Copyright 2026 Stockfolio NG',
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  );
 
                   if (isDesktop) {
                     return SingleChildScrollView(
@@ -1379,6 +1393,7 @@ class _AuthScreenState extends State<AuthScreen> {
                                 Expanded(child: marketView),
                               ],
                             ),
+                            footer,
                           ],
                         ),
                       ),
@@ -1398,6 +1413,7 @@ class _AuthScreenState extends State<AuthScreen> {
                         authPanel,
                         const SizedBox(height: 16),
                         marketView,
+                        footer,
                       ],
                     ),
                   );
@@ -1444,11 +1460,12 @@ class _AuthHeroPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = theme.colorScheme;
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: scheme.surface,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xFFD7E2DE)),
+        border: Border.all(color: scheme.outlineVariant),
       ),
       child: Padding(
         padding: const EdgeInsets.all(24),
@@ -1461,13 +1478,10 @@ class _AuthHeroPanel extends StatelessWidget {
                   width: 42,
                   height: 42,
                   decoration: BoxDecoration(
-                    color: const Color(0xFF0E7C66).withValues(alpha: 0.12),
+                    color: scheme.primaryContainer.withValues(alpha: 0.85),
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: const Icon(
-                    Icons.candlestick_chart,
-                    color: Color(0xFF0E7C66),
-                  ),
+                  child: Icon(Icons.candlestick_chart, color: scheme.primary),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -1641,6 +1655,7 @@ class _LandingMarketView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = theme.colorScheme;
     final leaders = landing?.leaders;
     final movers = leaders?.topMovers ?? const <Stock>[];
     final losers = leaders?.topLosers ?? const <Stock>[];
@@ -1749,9 +1764,9 @@ class _LandingMarketView extends StatelessWidget {
               constraints: const BoxConstraints(minHeight: 340),
               padding: const EdgeInsets.all(18),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: scheme.surface,
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: const Color(0xFFD7E2DE)),
+                border: Border.all(color: scheme.outlineVariant),
               ),
               child: _LandingPulseChart(stocks: chartStocks),
             );
@@ -2104,14 +2119,15 @@ class _LandingMetricTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return SizedBox(
       width: 220,
       child: Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: scheme.surface,
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: const Color(0xFFD7E2DE)),
+          border: Border.all(color: scheme.outlineVariant),
         ),
         child: Row(
           children: [
@@ -2150,17 +2166,18 @@ class _LandingTag extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
-        color: const Color(0xFFF0F6F3),
+        color: scheme.surfaceContainerHighest.withValues(alpha: 0.7),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: const Color(0xFFD7E2DE)),
+        border: Border.all(color: scheme.outlineVariant),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 16, color: const Color(0xFF0E7C66)),
+          Icon(icon, size: 16, color: scheme.primary),
           const SizedBox(width: 6),
           Text(text),
         ],
@@ -2398,16 +2415,24 @@ class ThemeModeButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return PopupMenuButton<ThemeMode>(
-      tooltip: 'Theme',
-      initialValue: themeMode,
-      onSelected: onSelected,
-      icon: const Icon(Icons.brightness_6_outlined),
-      itemBuilder: (context) => const [
-        PopupMenuItem(value: ThemeMode.system, child: Text('System default')),
-        PopupMenuItem(value: ThemeMode.light, child: Text('Light')),
-        PopupMenuItem(value: ThemeMode.dark, child: Text('Dark')),
-      ],
+    final scheme = Theme.of(context).colorScheme;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: scheme.outlineVariant),
+      ),
+      child: PopupMenuButton<ThemeMode>(
+        tooltip: 'Theme',
+        initialValue: themeMode,
+        onSelected: onSelected,
+        icon: Icon(Icons.brightness_6_outlined, color: scheme.onSurface),
+        itemBuilder: (context) => const [
+          PopupMenuItem(value: ThemeMode.system, child: Text('System default')),
+          PopupMenuItem(value: ThemeMode.light, child: Text('Light')),
+          PopupMenuItem(value: ThemeMode.dark, child: Text('Dark')),
+        ],
+      ),
     );
   }
 }
@@ -2430,6 +2455,10 @@ class LandingStockDetailSheet extends StatelessWidget {
         final detail = snapshot.data;
         final resolvedStock = detail?.stock ?? stock;
         final points = detail?.history ?? [];
+        final hasIntradayFallback =
+            points.isEmpty &&
+            (resolvedStock.openPrice ?? 0) > 0 &&
+            (resolvedStock.lastPrice ?? 0) > 0;
         final latest = points.isEmpty ? null : points.last;
         final marketSnapshot = detail?.marketSnapshot;
         final news = detail?.news ?? [];
@@ -2475,6 +2504,8 @@ class LandingStockDetailSheet extends StatelessWidget {
                     height: 240,
                     child: loading
                         ? const Center(child: CircularProgressIndicator())
+                        : hasIntradayFallback
+                        ? _LandingPulseChart(stocks: [resolvedStock])
                         : points.isEmpty
                         ? const EmptyState(
                             icon: Icons.show_chart,
