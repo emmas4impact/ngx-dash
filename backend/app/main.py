@@ -19,6 +19,7 @@ from .notifications import portfolio_report_pdf, send_email
 from .ngx_client import (
     NgxFetchError,
     discover_stock_ngx_id,
+    fetch_all_stocks_from_ngx_cached,
     fetch_company_news_cached,
     fetch_company_news_from_ngx,
     fetch_market_snapshot_cached,
@@ -111,6 +112,19 @@ def intraday_leader_payload(stock: Stock) -> dict | None:
     return payload
 
 
+def intraday_leader_payload_from_dict(stock: dict) -> dict | None:
+    current_price = float(stock["last_price"]) if stock.get("last_price") is not None else None
+    opening_price = float(stock["open_price"]) if stock.get("open_price") is not None else None
+    if current_price is None or opening_price is None or opening_price <= 0:
+        return None
+
+    payload = dict(stock)
+    payload["change"] = current_price - opening_price
+    payload["percent_change"] = (payload["change"] / opening_price) * 100
+    payload.setdefault("source", "ngx_doclib_live")
+    return payload
+
+
 def market_leaders_payload(db: Session, limit: int) -> dict:
     stocks = db.scalars(
         select(Stock)
@@ -118,6 +132,18 @@ def market_leaders_payload(db: Session, limit: int) -> dict:
         .order_by(Stock.symbol)
     ).all()
     ranked = [payload for stock in stocks if (payload := intraday_leader_payload(stock)) is not None]
+    if len(ranked) < max(2, limit):
+        try:
+            live_ranked = [
+                payload
+                for stock in fetch_all_stocks_from_ngx_cached()
+                if (payload := intraday_leader_payload_from_dict(stock)) is not None
+            ]
+        except NgxFetchError as exc:
+            logger.warning("Live market leaders fallback failed: %s", exc)
+        else:
+            if live_ranked:
+                ranked = live_ranked
     ranked.sort(key=lambda item: (item["percent_change"], item["symbol"]), reverse=True)
     return {
         "top_movers": ranked[:limit],
