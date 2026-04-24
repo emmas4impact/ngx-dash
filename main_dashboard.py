@@ -247,40 +247,6 @@ if not live_df.empty:
                             key=f"hist_{selected_symbol}_{range_label}_{chart_type}"
                         )
 
-    # st.header("Historical Price Chart")
-    #
-    # # Chart type selection
-    # chart_type = st.selectbox("Select Chart Type:", ["Line Chart", "Bar Chart"])
-    #
-    # if 'Symbol' in live_df.columns:
-    #     available_symbols_for_chart = sorted([s for s in live_df['Symbol'].unique() if s in STOCK_ID_MAPPING])
-    # else:
-    #     available_symbols_for_chart = []
-    #
-    # if not available_symbols_for_chart:
-    #     st.warning("No stocks for charting. Check `STOCK_ID_MAPPING` in `config.py` & sheet symbols.")
-    # else:
-    #     selected_symbol = st.selectbox("Select Stock for Historical Chart:", options=available_symbols_for_chart)
-    #     if selected_symbol:
-    #         ngx_specific_id = STOCK_ID_MAPPING.get(selected_symbol)
-    #         if ngx_specific_id:
-    #             historical_df = fetch_historical_data(ngx_specific_id)
-    #             if not historical_df.empty:
-    #                 fig = None
-    #                 if chart_type == "Line Chart":
-    #                     fig = px.line(historical_df, x='Date', y='Price',
-    #                                   title=f"{selected_symbol} Historical Price (Line)")
-    #                 elif chart_type == "Bar Chart":
-    #                     fig = px.bar(historical_df, x='Date', y='Price',
-    #                                  title=f"{selected_symbol} Historical Price (Bar)")
-    #
-    #                 if fig:
-    #                     fig.update_layout(xaxis_title="Date", yaxis_title=f"Price ({CURRENCY_SYMBOL})")
-    #                     st.plotly_chart(fig, width="stretch")
-    #
-    #
-    #         else:
-    #             st.error(f"NGX chart ID not found for {selected_symbol} in `config.py`.")
 else:
     st.warning("Could not load live data. Check Google Sheet connection and Apps Script.")
 
