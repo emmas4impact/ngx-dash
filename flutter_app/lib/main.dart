@@ -1271,33 +1271,72 @@ class _AuthHeroPanel extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 24),
-            if (registerMode) ...[
-              TextField(
-                controller: fullName,
-                decoration: const InputDecoration(
-                  prefixIcon: Icon(Icons.badge_outlined),
-                  labelText: 'Name',
-                ),
+            AutofillGroup(
+              child: Column(
+                children: [
+                  if (registerMode) ...[
+                    TextField(
+                      controller: fullName,
+                      autofillHints: const [AutofillHints.name],
+                      decoration: const InputDecoration(
+                        prefixIcon: Icon(Icons.badge_outlined),
+                        labelText: 'Name',
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                  TextField(
+                    controller: email,
+                    keyboardType: TextInputType.emailAddress,
+                    autofillHints: registerMode
+                        ? const [AutofillHints.newUsername, AutofillHints.email]
+                        : const [AutofillHints.username, AutofillHints.email],
+                    decoration: const InputDecoration(
+                      prefixIcon: Icon(Icons.mail_outline),
+                      labelText: 'Email',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: password,
+                    obscureText: true,
+                    autofillHints: registerMode
+                        ? const [AutofillHints.newPassword]
+                        : const [AutofillHints.password],
+                    onSubmitted: (_) {
+                      if (!busy) {
+                        onSubmit();
+                      }
+                    },
+                    decoration: const InputDecoration(
+                      prefixIcon: Icon(Icons.lock_outline),
+                      labelText: 'Password',
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 12),
+            ),
+            if (!registerMode) ...[
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Icon(
+                    Icons.password_outlined,
+                    size: 16,
+                    color: theme.colorScheme.secondary,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Your browser or device can offer to save this password after sign in.',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ],
-            TextField(
-              controller: email,
-              keyboardType: TextInputType.emailAddress,
-              decoration: const InputDecoration(
-                prefixIcon: Icon(Icons.mail_outline),
-                labelText: 'Email',
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: password,
-              obscureText: true,
-              decoration: const InputDecoration(
-                prefixIcon: Icon(Icons.lock_outline),
-                labelText: 'Password',
-              ),
-            ),
             const SizedBox(height: 20),
             FilledButton.icon(
               onPressed: busy ? null : onSubmit,

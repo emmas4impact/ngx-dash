@@ -90,7 +90,14 @@ def normalize_stock(raw: dict[str, Any], source: str) -> dict[str, Any] | None:
     symbol_text = str(symbol).strip().upper()
     last_price = _number(_first(raw, ["Value", "last_price", "lastPrice", "price", "currentPrice", "close", "Close"]))
     previous_close = _number(_first(raw, ["previous_close", "previousClose", "pclose", "prevClose"]))
+    raw_price_move = _number(
+        _first(raw, ["Change", "change", "PercChange", "percent_change", "changePercent", "percentageChange", "Change %"])
+    )
     open_price = _number(_first(raw, ["Open", "open", "open_price"]))
+    if open_price in (None, 0) and last_price is not None and raw_price_move is not None:
+        derived_open = last_price - raw_price_move
+        if derived_open > 0:
+            open_price = derived_open
     high_price = _number(_first(raw, ["High", "high", "high_price", "dayHigh"]))
     low_price = _number(_first(raw, ["Low", "low", "low_price", "dayLow"]))
     ngx_id = _first(raw, ["ngx_id", "ngxId", "isin", "ISIN"])
@@ -108,7 +115,10 @@ def normalize_stock(raw: dict[str, Any], source: str) -> dict[str, Any] | None:
     reference_price = previous_close if previous_close not in (None, 0) else open_price
     computed_change: float | None = None
     computed_percent_change: float | None = None
-    if last_price is not None and reference_price not in (None, 0):
+    if raw_price_move is not None and open_price not in (None, 0):
+        computed_change = raw_price_move
+        computed_percent_change = (computed_change / open_price) * 100
+    elif last_price is not None and reference_price not in (None, 0):
         computed_change = last_price - reference_price
         computed_percent_change = (computed_change / reference_price) * 100
 
@@ -125,11 +135,11 @@ def normalize_stock(raw: dict[str, Any], source: str) -> dict[str, Any] | None:
         "low_price": low_price,
         "volume": _number(_first(raw, ["Volume", "volume"])),
         "market_cap": _number(_first(raw, ["MarketCap", "market_cap", "marketCap", "Mkt Cap"])),
-        "change": computed_change if computed_change is not None else _number(_first(raw, ["Change", "change"])),
+        "change": computed_change if computed_change is not None else raw_price_move,
         "percent_change": (
             computed_percent_change
             if computed_percent_change is not None
-            else _number(_first(raw, ["PercChange", "percent_change", "changePercent", "percentageChange", "Change %"]))
+            else raw_price_move
         ),
         "margin": margin,
         "source": source,
@@ -157,6 +167,11 @@ def fetch_all_stocks_from_ngx() -> list[dict[str, Any]]:
         raise NgxFetchError("NGX ticker response was not a list of equities.")
 
     return [stock for item in payload if isinstance(item, dict) and (stock := normalize_stock(item, "ngx_doclib"))]
+
+
+@_ttl_cache(ttl_seconds=30)
+def fetch_all_stocks_from_ngx_cached() -> list[dict[str, Any]]:
+    return fetch_all_stocks_from_ngx()
 
 
 def fetch_historical_prices(ngx_id: str) -> list[dict[str, Any]]:
