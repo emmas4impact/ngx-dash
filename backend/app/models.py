@@ -30,6 +30,9 @@ class User(TimestampMixin, Base):
     is_superuser: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
     holdings: Mapped[list["PortfolioHolding"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    push_tokens: Mapped[list["PushDeviceToken"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
 
 
 class Stock(TimestampMixin, Base):
@@ -106,6 +109,34 @@ class PortfolioHolding(TimestampMixin, Base):
 
     user: Mapped[User] = relationship(back_populates="holdings")
     stock: Mapped[Stock] = relationship(back_populates="holdings")
+
+
+class PushDeviceToken(TimestampMixin, Base):
+    __tablename__ = "push_device_tokens"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    token: Mapped[str] = mapped_column(String(512), unique=True, index=True)
+    platform: Mapped[str] = mapped_column(String(32), index=True)
+    device_label: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    notifications_enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    last_registered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    user: Mapped[User] = relationship(back_populates="push_tokens")
+
+
+class PortfolioAlertState(TimestampMixin, Base):
+    __tablename__ = "portfolio_alert_states"
+    __table_args__ = (UniqueConstraint("user_id", "stock_symbol", name="uq_portfolio_alert_user_stock"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    stock_symbol: Mapped[str] = mapped_column(ForeignKey("stocks.symbol", ondelete="CASCADE"), index=True)
+    baseline_price: Mapped[float | None] = mapped_column(Numeric(18, 4), nullable=True)
+    last_seen_price: Mapped[float | None] = mapped_column(Numeric(18, 4), nullable=True)
+    last_alert_price: Mapped[float | None] = mapped_column(Numeric(18, 4), nullable=True)
+    last_alert_change_percent: Mapped[float | None] = mapped_column(Numeric(10, 4), nullable=True)
+    last_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class AccountDeletionRequest(TimestampMixin, Base):

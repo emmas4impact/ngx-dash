@@ -90,6 +90,7 @@ def normalize_stock(raw: dict[str, Any], source: str) -> dict[str, Any] | None:
     symbol_text = str(symbol).strip().upper()
     last_price = _number(_first(raw, ["Value", "last_price", "lastPrice", "price", "currentPrice", "close", "Close"]))
     previous_close = _number(_first(raw, ["previous_close", "previousClose", "pclose", "prevClose"]))
+    open_price = _number(_first(raw, ["Open", "open", "open_price"]))
     high_price = _number(_first(raw, ["High", "high", "high_price", "dayHigh"]))
     low_price = _number(_first(raw, ["Low", "low", "low_price", "dayLow"]))
     ngx_id = _first(raw, ["ngx_id", "ngxId", "isin", "ISIN"])
@@ -104,6 +105,13 @@ def normalize_stock(raw: dict[str, Any], source: str) -> dict[str, Any] | None:
     if margin is None and high_price is not None and low_price is not None and last_price:
         margin = ((high_price - low_price) / last_price) * 100
 
+    reference_price = previous_close if previous_close not in (None, 0) else open_price
+    computed_change: float | None = None
+    computed_percent_change: float | None = None
+    if last_price is not None and reference_price not in (None, 0):
+        computed_change = last_price - reference_price
+        computed_percent_change = (computed_change / reference_price) * 100
+
     return {
         "symbol": symbol_text,
         "name": _first(raw, ["SYMBOL2", "Name", "TickerName", "name", "companyName", "company", "security", "Security"]),
@@ -112,14 +120,16 @@ def normalize_stock(raw: dict[str, Any], source: str) -> dict[str, Any] | None:
         "sector": _first(raw, ["Sector", "sector"]),
         "last_price": last_price,
         "previous_close": previous_close,
-        "open_price": _number(_first(raw, ["Open", "open", "open_price"])),
+        "open_price": open_price,
         "high_price": high_price,
         "low_price": low_price,
         "volume": _number(_first(raw, ["Volume", "volume"])),
         "market_cap": _number(_first(raw, ["MarketCap", "market_cap", "marketCap", "Mkt Cap"])),
-        "change": _number(_first(raw, ["Change", "change"])),
-        "percent_change": _number(
-            _first(raw, ["PercChange", "percent_change", "changePercent", "percentageChange", "Change %"])
+        "change": computed_change if computed_change is not None else _number(_first(raw, ["Change", "change"])),
+        "percent_change": (
+            computed_percent_change
+            if computed_percent_change is not None
+            else _number(_first(raw, ["PercChange", "percent_change", "changePercent", "percentageChange", "Change %"]))
         ),
         "margin": margin,
         "source": source,
