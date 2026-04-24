@@ -5,7 +5,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
-from .models import MarketStatus, PortfolioHolding, Stock, StockPrice, SyncLog, User
+from .models import MarketStatus, PortfolioAlertState, PortfolioHolding, Stock, StockPrice, SyncLog, User
 from .ngx_client import (
     NgxFetchError,
     fetch_all_stocks_from_ngx,
@@ -245,10 +245,17 @@ def upsert_holding(db: Session, user: User, payload: HoldingUpsert) -> Portfolio
 
 
 def delete_holding(db: Session, user: User, symbol: str) -> bool:
+    normalized_symbol = symbol.strip().upper()
+    db.execute(
+        delete(PortfolioAlertState).where(
+            PortfolioAlertState.user_id == user.id,
+            PortfolioAlertState.stock_symbol == normalized_symbol,
+        )
+    )
     result = db.execute(
         delete(PortfolioHolding).where(
             PortfolioHolding.user_id == user.id,
-            PortfolioHolding.stock_symbol == symbol.strip().upper(),
+            PortfolioHolding.stock_symbol == normalized_symbol,
         )
     )
     db.commit()

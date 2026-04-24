@@ -14,17 +14,19 @@ from sqlalchemy.orm import Session, selectinload
 from .auth import create_access_token, get_current_superuser, get_current_user, hash_password, verify_password
 from .database import Base, SessionLocal, engine, get_db
 from .legal import render_account_deletion_html, render_privacy_policy_html
-from .models import AccountDeletionRequest, PortfolioHolding, Stock, User
+from .models import AccountDeletionRequest, PortfolioHolding, PushDeviceToken, Stock, User
 from .notifications import portfolio_report_pdf, send_email
 from .ngx_client import (
     NgxFetchError,
     discover_stock_ngx_id,
+    fetch_all_stocks_from_ngx_cached,
     fetch_company_news_cached,
     fetch_company_news_from_ngx,
     fetch_market_snapshot_cached,
     fetch_market_snapshot_from_ngx,
     fetch_stock_logo,
 )
+from .push import PushDeliveryError, dispatch_portfolio_price_alerts, remove_push_token, send_push_message, upsert_push_token
 from .schemas import (
     AccountDeleteRequest,
     AccountDeletionRequestCreate,
@@ -33,11 +35,18 @@ from .schemas import (
     HoldingOut,
     HoldingUpsert,
     LoginRequest,
+    MarketLeadersOut,
     MarketSnapshotOut,
     MarketStatusOut,
     MessageResponse,
     PasswordChangeRequest,
+    PasswordResetConfirm,
+    PasswordResetRequest,
     ProfileUpdate,
+    PushStatusOut,
+    PushTestRequest,
+    PushTokenDelete,
+    PushTokenUpsert,
     RegisterRequest,
     StockOut,
     StockDetailOut,
@@ -91,6 +100,59 @@ def stock_history_is_stale(rows: list) -> bool:
     return datetime.now(timezone.utc) - latest_updated_at > refresh_after
 
 
+def intraday_leader_payload(stock: Stock) -> dict | None:
+    current_price = float(stock.last_price) if stock.last_price is not None else None
+    opening_price = float(stock.open_price) if stock.open_price is not None else None
+    if current_price is None or opening_price is None or opening_price <= 0:
+        return None
+
+    change = current_price - opening_price
+    percent_change = (change / opening_price) * 100
+    payload = StockOut.model_validate(stock).model_dump()
+    payload["change"] = change
+    payload["percent_change"] = percent_change
+    return payload
+
+
+def intraday_leader_payload_from_dict(stock: dict) -> dict | None:
+    current_price = float(stock["last_price"]) if stock.get("last_price") is not None else None
+    opening_price = float(stock["open_price"]) if stock.get("open_price") is not None else None
+    if current_price is None or opening_price is None or opening_price <= 0:
+        return None
+
+    payload = dict(stock)
+    payload["change"] = current_price - opening_price
+    payload["percent_change"] = (payload["change"] / opening_price) * 100
+    payload.setdefault("source", "ngx_doclib_live")
+    return payload
+
+
+def market_leaders_payload(db: Session, limit: int) -> dict:
+    stocks = db.scalars(
+        select(Stock)
+        .where(Stock.last_price.is_not(None), Stock.open_price.is_not(None))
+        .order_by(Stock.symbol)
+    ).all()
+    ranked = [payload for stock in stocks if (payload := intraday_leader_payload(stock)) is not None]
+    if len(ranked) < max(2, limit):
+        try:
+            live_ranked = [
+                payload
+                for stock in fetch_all_stocks_from_ngx_cached()
+                if (payload := intraday_leader_payload_from_dict(stock)) is not None
+            ]
+        except NgxFetchError as exc:
+            logger.warning("Live market leaders fallback failed: %s", exc)
+        else:
+            if live_ranked:
+                ranked = live_ranked
+    ranked.sort(key=lambda item: (item["percent_change"], item["symbol"]), reverse=True)
+    return {
+        "top_movers": ranked[:limit],
+        "top_losers": sorted(ranked, key=lambda item: (item["percent_change"], item["symbol"]))[:limit],
+    }
+
+
 def ensure_stock_ngx_id(db: Session, stock: Stock) -> str | None:
     if stock.ngx_id:
         return stock.ngx_id
@@ -115,6 +177,14 @@ async def background_stock_sync_loop() -> None:
         try:
             await asyncio.to_thread(sync_stocks, db, False)
             await asyncio.to_thread(refresh_market_status, db)
+            if settings.push_enabled:
+                result = await asyncio.to_thread(dispatch_portfolio_price_alerts, db, settings)
+                if result["alerts_sent"]:
+                    logger.info(
+                        "Sent %s portfolio push alerts to %s device tokens",
+                        result["alerts_sent"],
+                        result["tokens_sent"],
+                    )
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -142,9 +212,12 @@ def ensure_runtime_schema() -> None:
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT false"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_token VARCHAR(128)"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_sent_at TIMESTAMPTZ"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_token VARCHAR(128)"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_sent_at TIMESTAMPTZ"))
         conn.execute(
             text("CREATE INDEX IF NOT EXISTS ix_users_email_verification_token ON users(email_verification_token)")
         )
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_users_password_reset_token ON users(password_reset_token)"))
         conn.execute(
             text(
                 """
@@ -213,6 +286,19 @@ def public_stock_logo(symbol: str) -> Response:
         media_type=media_type,
         headers={"Cache-Control": "public, max-age=86400"},
     )
+
+
+@app.get("/public/market/status", response_model=MarketStatusOut, include_in_schema=False)
+def public_market_status(db: Session = Depends(get_db)) -> dict:
+    return get_cached_market_status(db)
+
+
+@app.get("/public/market/leaders", response_model=MarketLeadersOut, include_in_schema=False)
+def public_market_leaders(
+    limit: int = Query(default=6, ge=1, le=20),
+    db: Session = Depends(get_db),
+) -> dict:
+    return market_leaders_payload(db, limit)
 
 
 @app.get("/public/privacy-policy", include_in_schema=False, response_class=HTMLResponse)
@@ -286,6 +372,15 @@ def _verification_url(token: str) -> str:
     return f"{base_url}/?verify_email_token={token}"
 
 
+def _new_password_reset_token() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def _password_reset_url(token: str) -> str:
+    base_url = settings.frontend_base_url.rstrip("/")
+    return f"{base_url}/?reset_password_token={token}"
+
+
 @app.post("/auth/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
 def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> User:
     existing = db.scalar(select(User).where(User.email == payload.email.lower()))
@@ -326,6 +421,65 @@ def verify_email(token: str, db: Session = Depends(get_db)) -> MessageResponse:
     user.email_verification_sent_at = None
     db.commit()
     return MessageResponse(message="Email address verified.")
+
+
+@app.post("/auth/forgot-password", response_model=MessageResponse)
+def forgot_password(payload: PasswordResetRequest, db: Session = Depends(get_db)) -> MessageResponse:
+    user = db.scalar(select(User).where(User.email == payload.email.lower()))
+    generic_message = "If that email is registered, a password reset link has been sent."
+    if user is None:
+        return MessageResponse(message=generic_message)
+
+    user.password_reset_token = _new_password_reset_token()
+    user.password_reset_sent_at = datetime.now(timezone.utc)
+    db.commit()
+    reset_url = _password_reset_url(user.password_reset_token)
+
+    if not settings.email_enabled:
+        return MessageResponse(
+            message="Email is not configured yet. Password reset link generated for testing.",
+            verification_url=reset_url,
+        )
+
+    try:
+        send_email(
+            settings,
+            to_email=user.email,
+            subject="Reset your Stockfolio NG password",
+            body=(
+                f"Hello {user.full_name or user.email},\n\n"
+                "Use this link to reset your password:\n"
+                f"{reset_url}\n\n"
+                "If you did not request this, you can ignore this email."
+            ),
+        )
+    except Exception as exc:
+        logger.warning("Password reset delivery failed via %s: %s", settings.email_provider, exc)
+        return MessageResponse(message=f"Could not send reset email yet: {exc}")
+
+    return MessageResponse(message=generic_message)
+
+
+@app.post("/auth/reset-password", response_model=MessageResponse)
+def reset_password(payload: PasswordResetConfirm, db: Session = Depends(get_db)) -> MessageResponse:
+    user = db.scalar(select(User).where(User.password_reset_token == payload.token))
+    if user is None or user.password_reset_sent_at is None:
+        raise HTTPException(status_code=404, detail="Password reset link is invalid or expired")
+
+    sent_at = user.password_reset_sent_at
+    if sent_at.tzinfo is None:
+        sent_at = sent_at.replace(tzinfo=timezone.utc)
+    if datetime.now(timezone.utc) - sent_at > timedelta(hours=2):
+        user.password_reset_token = None
+        user.password_reset_sent_at = None
+        db.commit()
+        raise HTTPException(status_code=400, detail="Password reset link has expired")
+
+    user.password_hash = hash_password(payload.new_password)
+    user.password_reset_token = None
+    user.password_reset_sent_at = None
+    db.commit()
+    return MessageResponse(message="Password reset successful. You can now sign in.")
 
 
 @app.get("/me", response_model=UserOut)
@@ -452,6 +606,34 @@ def email_portfolio_report(
     return MessageResponse(message=f"Portfolio report emailed to {user.email}.")
 
 
+@app.post("/me/push-tokens", response_model=MessageResponse)
+def register_push_token(
+    payload: PushTokenUpsert,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> MessageResponse:
+    upsert_push_token(
+        db,
+        user,
+        token=payload.token,
+        platform=payload.platform,
+        device_label=payload.device_label,
+    )
+    return MessageResponse(message="Push token registered.")
+
+
+@app.delete("/me/push-tokens", status_code=status.HTTP_204_NO_CONTENT)
+def unregister_push_token(
+    payload: PushTokenDelete,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Response:
+    removed = remove_push_token(db, user, token=payload.token)
+    if not removed:
+        raise HTTPException(status_code=404, detail="Push token not found")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @app.get("/market/status", response_model=MarketStatusOut)
 def get_market_status(db: Session = Depends(get_db), _: User = Depends(get_current_user)) -> dict:
     return get_cached_market_status(db)
@@ -464,6 +646,15 @@ def get_market_snapshot(_: User = Depends(get_current_user)) -> dict:
     except NgxFetchError as exc:
         logger.warning("Market snapshot fetch failed: %s", exc)
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.get("/market/leaders", response_model=MarketLeadersOut)
+def get_market_leaders(
+    limit: int = Query(default=5, ge=1, le=20),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> dict:
+    return market_leaders_payload(db, limit)
 
 
 @app.get("/stocks", response_model=list[StockOut])
@@ -532,13 +723,11 @@ def get_stock_history(
     return rows
 
 
-@app.get("/stocks/{symbol}/detail", response_model=StockDetailOut)
-def get_stock_detail(
+def build_stock_detail(
     symbol: str,
     months: int = Query(default=12, ge=1, le=120),
     news_limit: int = Query(default=6, ge=1, le=20),
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
 ) -> dict:
     stock = db.get(Stock, symbol.strip().upper())
     if stock is None:
@@ -572,6 +761,27 @@ def get_stock_detail(
         "market_snapshot": market_snapshot,
         "news": news,
     }
+
+
+@app.get("/public/stocks/{symbol}/detail", response_model=StockDetailOut, include_in_schema=False)
+def get_public_stock_detail(
+    symbol: str,
+    months: int = Query(default=12, ge=1, le=120),
+    news_limit: int = Query(default=6, ge=1, le=20),
+    db: Session = Depends(get_db),
+) -> dict:
+    return build_stock_detail(symbol, months, news_limit, db)
+
+
+@app.get("/stocks/{symbol}/detail", response_model=StockDetailOut)
+def get_stock_detail(
+    symbol: str,
+    months: int = Query(default=12, ge=1, le=120),
+    news_limit: int = Query(default=6, ge=1, le=20),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> dict:
+    return build_stock_detail(symbol, months, news_limit, db)
 
 
 @app.post("/admin/sync/stocks", response_model=SyncResult)
@@ -615,6 +825,65 @@ def get_email_status(_: User = Depends(get_current_superuser)) -> dict:
         "has_smtp_from_email": bool(settings.smtp_from_email),
         "from_email": settings.from_email,
     }
+
+
+@app.get("/admin/push/status", response_model=PushStatusOut)
+def get_push_status(db: Session = Depends(get_db), _: User = Depends(get_current_superuser)) -> dict:
+    registered_devices = db.scalar(select(func.count()).select_from(PushDeviceToken)) or 0
+    users_with_devices = (
+        db.scalar(select(func.count(func.distinct(PushDeviceToken.user_id))).select_from(PushDeviceToken)) or 0
+    )
+    return {
+        "enabled": settings.push_enabled,
+        "project_id": settings.firebase_project_id,
+        "registered_devices": registered_devices,
+        "users_with_devices": users_with_devices,
+        "threshold_percent": settings.push_alert_threshold_percent,
+    }
+
+
+@app.post("/admin/push/test", response_model=MessageResponse)
+def send_test_push(
+    payload: PushTestRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_superuser),
+) -> MessageResponse:
+    devices = db.scalars(select(PushDeviceToken).where(PushDeviceToken.user_id == user.id)).all()
+    if not devices:
+        return MessageResponse(message="No registered push devices found for this admin account yet.")
+    if not settings.push_enabled:
+        return MessageResponse(message="Firebase push is not configured on the server yet.")
+
+    title = payload.title or "Stockfolio NG push test"
+    body = payload.body or "Push alerts are wired up. This is a test notification."
+    delivered = 0
+    invalid_devices: list[PushDeviceToken] = []
+    for device in devices:
+        try:
+            send_push_message(
+                settings,
+                token=device.token,
+                title=title,
+                body=body,
+                data={
+                    "type": "test_push",
+                    "route": "portfolio",
+                    "symbol": (payload.symbol or "").strip().upper(),
+                },
+            )
+        except PushDeliveryError as exc:
+            logger.warning("Push test delivery failed for %s: %s", device.platform, exc)
+            if "UNREGISTERED" in str(exc).upper() or "INVALID_ARGUMENT" in str(exc).upper():
+                invalid_devices.append(device)
+            continue
+        delivered += 1
+
+    for device in invalid_devices:
+        db.delete(device)
+    if invalid_devices:
+        db.commit()
+
+    return MessageResponse(message=f"Sent test push to {delivered} device(s).")
 
 
 @app.get("/admin/account-deletion-requests", response_model=list[AccountDeletionRequestOut])
