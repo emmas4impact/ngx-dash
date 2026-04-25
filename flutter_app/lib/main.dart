@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
-import 'package:file_picker/file_picker.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -15,6 +14,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'app_version.dart';
 import 'config.dart';
 import 'push_notifications.dart';
+import 'profile_image_picker_stub.dart'
+    if (dart.library.html) 'profile_image_picker_web.dart';
 import 'stock_logo_assets.dart';
 
 final apiBaseUrl = normalizeApiBaseUrl(configuredApiBaseUrl());
@@ -3682,20 +3683,11 @@ class _AccountScreenState extends State<AccountScreen> {
       Uint8List? bytes;
       String mimeType = 'image/jpeg';
       if (kIsWeb) {
-        final result = await FilePicker.platform.pickFiles(
-          type: FileType.image,
-          withData: true,
-          allowMultiple: false,
-        );
-        final file = result?.files.singleOrNull;
-        bytes = file?.bytes;
-        final extension = file?.extension?.toLowerCase();
-        mimeType = switch (extension) {
-          'png' => 'image/png',
-          'gif' => 'image/gif',
-          'webp' => 'image/webp',
-          _ => 'image/jpeg',
-        };
+        final picked = await pickProfileImageForWeb();
+        if (picked != null) {
+          bytes = Uint8List.fromList(picked.bytes);
+          mimeType = picked.mimeType;
+        }
       } else {
         final file = await imagePicker.pickImage(
           source: ImageSource.gallery,
