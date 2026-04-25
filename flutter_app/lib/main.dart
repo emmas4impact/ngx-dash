@@ -3620,6 +3620,7 @@ class _AccountScreenState extends State<AccountScreen> {
   final imagePicker = ImagePicker();
   int? loadedUserId;
   String? profileImageUrl;
+  MemoryImage? profileImageMemory;
   bool savingProfile = false;
   bool sendingVerification = false;
   bool sendingReport = false;
@@ -3640,7 +3641,7 @@ class _AccountScreenState extends State<AccountScreen> {
     if (loadedUserId == user.id) return;
     loadedUserId = user.id;
     fullName.text = user.fullName ?? '';
-    profileImageUrl = user.profileImageUrl;
+    _setProfileImage(user.profileImageUrl);
     phone.text = user.phone ?? '';
     address.text = user.address ?? '';
     city.text = user.city ?? '';
@@ -3650,7 +3651,7 @@ class _AccountScreenState extends State<AccountScreen> {
   Future<void> saveProfile() async {
     setState(() => savingProfile = true);
     try {
-      await widget.api.updateProfile(
+      final updatedUser = await widget.api.updateProfile(
         ProfileInput(
           fullName: blankToNull(fullName.text),
           profileImageUrl: profileImageUrl,
@@ -3660,7 +3661,12 @@ class _AccountScreenState extends State<AccountScreen> {
           country: blankToNull(country.text),
         ),
       );
-      loadedUserId = null;
+      loadedUserId = updatedUser.id;
+      _setProfileImage(updatedUser.profileImageUrl);
+      phone.text = updatedUser.phone ?? '';
+      address.text = updatedUser.address ?? '';
+      city.text = updatedUser.city ?? '';
+      country.text = updatedUser.country ?? '';
       widget.onProfileChanged();
       if (mounted) showMessage(context, 'Profile updated.');
     } catch (error) {
@@ -3679,6 +3685,7 @@ class _AccountScreenState extends State<AccountScreen> {
         final result = await FilePicker.platform.pickFiles(
           type: FileType.image,
           withData: true,
+          allowMultiple: false,
         );
         final file = result?.files.singleOrNull;
         bytes = file?.bytes;
@@ -3706,8 +3713,10 @@ class _AccountScreenState extends State<AccountScreen> {
       if (bytes == null || bytes.isEmpty) return;
       if (!mounted) return;
       setState(() {
-        profileImageUrl = 'data:$mimeType;base64,${base64Encode(bytes!)}';
+        profileImageMemory = MemoryImage(bytes!);
+        profileImageUrl = 'data:$mimeType;base64,${base64Encode(bytes)}';
       });
+      showMessage(context, 'Photo selected. Save profile to keep it.');
     } catch (error) {
       if (mounted) showError(context, error.toString());
     } finally {
@@ -3716,7 +3725,23 @@ class _AccountScreenState extends State<AccountScreen> {
   }
 
   void clearProfileImage() {
-    setState(() => profileImageUrl = null);
+    setState(() {
+      profileImageUrl = null;
+      profileImageMemory = null;
+    });
+  }
+
+  void _setProfileImage(String? value) {
+    profileImageUrl = value;
+    profileImageMemory = null;
+    final trimmed = value?.trim();
+    if (trimmed == null || trimmed.isEmpty || !trimmed.startsWith('data:')) {
+      return;
+    }
+    try {
+      final data = UriData.parse(trimmed);
+      profileImageMemory = MemoryImage(data.contentAsBytes());
+    } catch (_) {}
   }
 
   Future<void> sendVerification() async {
@@ -3886,6 +3911,7 @@ class _AccountScreenState extends State<AccountScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         ProfileAvatar(
+                          imageProvider: profileImageMemory,
                           imageUrl: profileImageUrl,
                           fallbackText: user.firstName,
                           radius: 30,
@@ -3899,7 +3925,6 @@ class _AccountScreenState extends State<AccountScreen> {
                                 user.displayName,
                                 style: Theme.of(context).textTheme.titleLarge,
                               ),
-                              Text(user.email),
                             ],
                           ),
                         ),
@@ -5885,18 +5910,20 @@ class ProfileLine extends StatelessWidget {
 class ProfileAvatar extends StatelessWidget {
   const ProfileAvatar({
     super.key,
+    this.imageProvider,
     required this.imageUrl,
     required this.fallbackText,
     this.radius = 24,
   });
 
+  final ImageProvider<Object>? imageProvider;
   final String? imageUrl;
   final String fallbackText;
   final double radius;
 
   @override
   Widget build(BuildContext context) {
-    final provider = profileImageProvider(imageUrl);
+    final provider = imageProvider ?? profileImageProvider(imageUrl);
     final trimmed = fallbackText.trim();
     final firstLetter = trimmed.isEmpty
         ? '?'
