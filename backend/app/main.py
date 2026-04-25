@@ -5,7 +5,7 @@ from contextlib import suppress
 from datetime import date, datetime, timedelta, timezone
 
 from dateutil.relativedelta import relativedelta
-from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from sqlalchemy import desc, func, select, text
@@ -495,11 +495,45 @@ def update_me(
     user: User = Depends(get_current_user),
 ) -> User:
     user.full_name = payload.full_name.strip() if payload.full_name else None
-    user.profile_image_url = payload.profile_image_url.strip() if payload.profile_image_url else None
     user.phone = payload.phone.strip() if payload.phone else None
     user.address = payload.address.strip() if payload.address else None
     user.city = payload.city.strip() if payload.city else None
     user.country = payload.country.strip() if payload.country else None
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@app.post("/me/profile-image", response_model=UserOut)
+async def upload_profile_image(
+    file: UploadFile = File(...),
+    mime_type: str | None = Form(default=None),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> User:
+    effective_mime_type = (mime_type or file.content_type or "").strip().lower()
+    if not effective_mime_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Please upload an image file.")
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Uploaded image is empty.")
+    if len(content) > 2_000_000:
+        raise HTTPException(status_code=400, detail="Profile image must be 2MB or smaller.")
+
+    encoded = base64.b64encode(content).decode("ascii")
+    user.profile_image_url = f"data:{effective_mime_type};base64,{encoded}"
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@app.delete("/me/profile-image", response_model=UserOut)
+def delete_profile_image(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> User:
+    user.profile_image_url = None
     db.commit()
     db.refresh(user)
     return user
