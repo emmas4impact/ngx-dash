@@ -1,3 +1,4 @@
+import base64
 import asyncio
 import logging
 import secrets
