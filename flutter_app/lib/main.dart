@@ -502,6 +502,34 @@ class ApiClient {
     return AppUser.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
   }
 
+  Future<AppUser> uploadProfileImage(
+    List<int> bytes, {
+    required String mimeType,
+    String filename = 'profile.jpg',
+  }) async {
+    final request = http.MultipartRequest('POST', _uri('/me/profile-image'));
+    if (_token != null) {
+      request.headers['Authorization'] = 'Bearer $_token';
+    }
+    request.fields['mime_type'] = mimeType;
+    request.files.add(
+      http.MultipartFile.fromBytes('file', bytes, filename: filename),
+    );
+    final streamed = await _client.send(request);
+    final response = await http.Response.fromStream(streamed);
+    _expect(response, 200);
+    return AppUser.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+  }
+
+  Future<AppUser> deleteProfileImage() async {
+    final response = await _client.delete(
+      _uri('/me/profile-image'),
+      headers: _headers,
+    );
+    _expect(response, 200);
+    return AppUser.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+  }
+
   Future<String> changePassword(
     String currentPassword,
     String newPassword,
@@ -3655,7 +3683,6 @@ class _AccountScreenState extends State<AccountScreen> {
       final updatedUser = await widget.api.updateProfile(
         ProfileInput(
           fullName: blankToNull(fullName.text),
-          profileImageUrl: profileImageUrl,
           phone: blankToNull(phone.text),
           address: blankToNull(address.text),
           city: blankToNull(city.text),
@@ -3682,11 +3709,19 @@ class _AccountScreenState extends State<AccountScreen> {
     try {
       Uint8List? bytes;
       String mimeType = 'image/jpeg';
+      String filename = 'profile.jpg';
       if (kIsWeb) {
         final picked = await pickProfileImageForWeb();
         if (picked != null) {
           bytes = Uint8List.fromList(picked.bytes);
           mimeType = picked.mimeType;
+          final extension = switch (mimeType) {
+            'image/png' => 'png',
+            'image/gif' => 'gif',
+            'image/webp' => 'webp',
+            _ => 'jpg',
+          };
+          filename = 'profile.$extension';
         }
       } else {
         final file = await imagePicker.pickImage(
@@ -3697,18 +3732,30 @@ class _AccountScreenState extends State<AccountScreen> {
         );
         if (file != null) {
           bytes = await file.readAsBytes();
+          filename = file.name;
           if (file.mimeType != null && file.mimeType!.isNotEmpty) {
             mimeType = file.mimeType!;
           }
         }
       }
       if (bytes == null || bytes.isEmpty) return;
+      final updatedUser = await widget.api.uploadProfileImage(
+        bytes,
+        mimeType: mimeType,
+        filename: filename,
+      );
       if (!mounted) return;
       setState(() {
-        profileImageMemory = MemoryImage(bytes!);
-        profileImageUrl = 'data:$mimeType;base64,${base64Encode(bytes)}';
+        loadedUserId = updatedUser.id;
+        _setProfileImage(updatedUser.profileImageUrl);
+        fullName.text = updatedUser.fullName ?? fullName.text;
+        phone.text = updatedUser.phone ?? '';
+        address.text = updatedUser.address ?? '';
+        city.text = updatedUser.city ?? '';
+        country.text = updatedUser.country ?? '';
       });
-      showMessage(context, 'Photo selected. Save profile to keep it.');
+      widget.onProfileChanged();
+      showMessage(context, 'Profile photo updated.');
     } catch (error) {
       if (mounted) showError(context, error.toString());
     } finally {
@@ -3716,11 +3763,22 @@ class _AccountScreenState extends State<AccountScreen> {
     }
   }
 
-  void clearProfileImage() {
-    setState(() {
-      profileImageUrl = null;
-      profileImageMemory = null;
-    });
+  Future<void> clearProfileImage() async {
+    setState(() => pickingProfileImage = true);
+    try {
+      final updatedUser = await widget.api.deleteProfileImage();
+      if (!mounted) return;
+      setState(() {
+        loadedUserId = updatedUser.id;
+        _setProfileImage(updatedUser.profileImageUrl);
+      });
+      widget.onProfileChanged();
+      showMessage(context, 'Profile photo removed.');
+    } catch (error) {
+      if (mounted) showError(context, error.toString());
+    } finally {
+      if (mounted) setState(() => pickingProfileImage = false);
+    }
   }
 
   void _setProfileImage(String? value) {
