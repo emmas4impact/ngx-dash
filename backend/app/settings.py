@@ -5,7 +5,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    app_name: str = "NGX Portfolio API"
+    app_name: str = "Stockfolio API"
     database_url: str = Field(validation_alias="DATABASE_URL")
     jwt_secret_key: str = Field(validation_alias="JWT_SECRET_KEY")
     jwt_algorithm: str = Field(default="HS256", validation_alias="JWT_ALGORITHM")

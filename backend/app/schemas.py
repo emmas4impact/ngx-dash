@@ -201,6 +201,22 @@ class MarketLeadersOut(BaseModel):
     top_losers: list[StockOut]
 
 
+class MarketIdeaOut(BaseModel):
+    stock: StockOut
+    score: float
+    rationale: list[str] = []
+    web_summary: str | None = None
+    price_to_earnings_ratio: float | None = None
+    price_to_book_ratio: float | None = None
+    fundamental_note: str | None = None
+
+
+class MarketIdeasOut(BaseModel):
+    disclaimer: str
+    generated_at: datetime | None = None
+    ideas: list[MarketIdeaOut]
+
+
 class PushStatusOut(BaseModel):
     enabled: bool
     project_id: str | None = None

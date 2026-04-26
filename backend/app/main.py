@@ -36,6 +36,8 @@ from .schemas import (
     HoldingOut,
     HoldingUpsert,
     LoginRequest,
+    MarketIdeasOut,
+    MarketIdeaOut,
     MarketLeadersOut,
     MarketSnapshotOut,
     MarketStatusOut,
@@ -84,6 +86,11 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+)
+
+MARKET_IDEAS_DISCLAIMER = (
+    "Stockfolio NG highlights data-driven watchlist ideas only. "
+    "It is not a financial adviser app. Contact your broker for detailed analysis."
 )
 
 
@@ -151,6 +158,113 @@ def market_leaders_payload(db: Session, limit: int) -> dict:
     return {
         "top_movers": ranked[:limit],
         "top_losers": sorted(ranked, key=lambda item: (item["percent_change"], item["symbol"]))[:limit],
+    }
+
+
+def _percentile(sorted_values: list[float], value: float | None) -> float:
+    if value is None or not sorted_values:
+        return 0.0
+    less_or_equal = 0
+    for candidate in sorted_values:
+        if candidate <= value:
+            less_or_equal += 1
+    return less_or_equal / len(sorted_values)
+
+
+def market_ideas_payload(db: Session, limit: int) -> dict:
+    stocks = list(
+        db.scalars(
+            select(Stock)
+            .where(Stock.last_price.is_not(None), Stock.open_price.is_not(None))
+            .order_by(Stock.symbol)
+        ).all()
+    )
+    if not stocks:
+        return {
+            "disclaimer": MARKET_IDEAS_DISCLAIMER,
+            "generated_at": datetime.now(timezone.utc),
+            "ideas": [],
+        }
+
+    volumes = sorted(float(stock.volume) for stock in stocks if stock.volume is not None and float(stock.volume) > 0)
+    market_caps = sorted(
+        float(stock.market_cap) for stock in stocks if stock.market_cap is not None and float(stock.market_cap) > 0
+    )
+
+    candidates: list[dict] = []
+    for stock in stocks:
+        current_price = float(stock.last_price) if stock.last_price is not None else None
+        opening_price = float(stock.open_price) if stock.open_price is not None else None
+        if current_price is None or opening_price is None or opening_price <= 0:
+            continue
+
+        intraday_change = ((current_price - opening_price) / opening_price) * 100
+        volume_score = _percentile(volumes, float(stock.volume) if stock.volume is not None else None)
+        market_cap_score = _percentile(market_caps, float(stock.market_cap) if stock.market_cap is not None else None)
+        margin_value = float(stock.margin) if stock.margin is not None else None
+        margin_score = 0.0 if margin_value is None else max(0.0, 1.0 - min(margin_value, 10.0) / 10.0)
+        close_strength = 0.0
+        if stock.previous_close is not None and current_price > float(stock.previous_close):
+            close_strength = 1.0
+
+        score = max(0.0, min(intraday_change, 10.0)) * 4.0
+        score += volume_score * 25.0
+        score += market_cap_score * 15.0
+        score += margin_score * 10.0
+        score += close_strength * 10.0
+
+        rationale: list[str] = []
+        if intraday_change > 0:
+            rationale.append(f"Positive intraday momentum of {intraday_change:.2f}% from the open.")
+        if volume_score >= 0.75:
+            rationale.append("Trading volume is in the top quartile of the tracked market.")
+        if market_cap_score >= 0.75:
+            rationale.append("Market cap ranks in the upper tier of the synced universe.")
+        if margin_value is not None and margin_value <= 4:
+            rationale.append(f"Margin is relatively tight at {margin_value:.2f}%.")
+        if close_strength > 0:
+            rationale.append("Current price is holding above the previous close.")
+        if stock.sector:
+            rationale.append(f"Sector: {stock.sector}.")
+
+        candidates.append(
+            {
+                "stock": StockOut.model_validate(stock).model_dump(),
+                "score": round(score, 2),
+                "rationale": rationale[:4],
+                "web_summary": None,
+                "price_to_earnings_ratio": None,
+                "price_to_book_ratio": None,
+                "fundamental_note": "P/E and P/B ratios are not yet available from the current synced source.",
+                "ngx_id": stock.ngx_id,
+            }
+        )
+
+    candidates.sort(key=lambda item: (item["score"], item["stock"]["symbol"]), reverse=True)
+    enriched: list[dict] = []
+    for candidate in candidates[: max(limit * 2, 6)]:
+        ngx_id = candidate.pop("ngx_id", None)
+        if ngx_id:
+            try:
+                news = fetch_company_news_cached(ngx_id)
+            except NgxFetchError as exc:
+                logger.warning("Company news fetch failed while building ideas for %s: %s", candidate["stock"]["symbol"], exc)
+            else:
+                if news:
+                    latest = news[0]
+                    candidate["web_summary"] = latest.get("title") or latest.get("submission_type")
+                    candidate["score"] = round(candidate["score"] + 5.0, 2)
+                    candidate["rationale"] = [
+                        *candidate["rationale"],
+                        "Recent company update/disclosure is available from NGX sources.",
+                    ][:5]
+        enriched.append(candidate)
+
+    enriched.sort(key=lambda item: (item["score"], item["stock"]["symbol"]), reverse=True)
+    return {
+        "disclaimer": MARKET_IDEAS_DISCLAIMER,
+        "generated_at": datetime.now(timezone.utc),
+        "ideas": enriched[:limit],
     }
 
 
@@ -592,7 +706,7 @@ def request_email_verification(
         send_email(
             settings,
             to_email=user.email,
-            subject="Verify your NGX Portfolio email",
+            subject="Verify your Stockfolio email",
             body=(
                 f"Hello {user.full_name or user.email},\n\n"
                 "Use this link to verify your email address:\n"
@@ -629,7 +743,7 @@ def email_portfolio_report(
         send_email(
             settings,
             to_email=user.email,
-            subject="Your NGX Portfolio Report",
+            subject="Your Stockfolio Report",
             body=(
                 f"Hello {user.full_name or user.email},\n\n"
                 "Your latest NGX investment portfolio report is attached as a PDF."
@@ -692,6 +806,15 @@ def get_market_leaders(
     _: User = Depends(get_current_user),
 ) -> dict:
     return market_leaders_payload(db, limit)
+
+
+@app.get("/market/ideas", response_model=MarketIdeasOut)
+def get_market_ideas(
+    limit: int = Query(default=5, ge=1, le=10),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> dict:
+    return market_ideas_payload(db, limit)
 
 
 @app.get("/stocks", response_model=list[StockOut])

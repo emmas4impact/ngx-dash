@@ -1,4 +1,4 @@
-# NGX Portfolio Dashboard
+# Stockfolio Dashboard
 
 This repo now contains two paths:
 

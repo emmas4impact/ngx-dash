@@ -210,7 +210,7 @@ class _NgxPortfolioAppState extends State<NgxPortfolioApp> {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'NGX Portfolio',
+      title: 'Stockfolio',
       themeMode: themeMode,
       theme: ThemeData(
         useMaterial3: true,
@@ -627,6 +627,17 @@ class ApiClient {
         .toList();
   }
 
+  Future<MarketIdeasBundle> marketIdeas({int limit = 4}) async {
+    final response = await _client.get(
+      _uri('/market/ideas', {'limit': '$limit'}),
+      headers: _headers,
+    );
+    _expect(response, 200);
+    return MarketIdeasBundle.fromJson(
+      jsonDecode(response.body) as Map<String, dynamic>,
+    );
+  }
+
   Future<Stock> stock(String symbol) async {
     final response = await _client.get(
       _uri('/stocks/$symbol'),
@@ -1031,6 +1042,64 @@ class StockDetailBundle {
       news: newsJson
           .map((item) => CompanyNewsItem.fromJson(item as Map<String, dynamic>))
           .toList(),
+    );
+  }
+}
+
+class MarketIdea {
+  MarketIdea({
+    required this.stock,
+    required this.score,
+    required this.rationale,
+    this.webSummary,
+    this.priceToEarningsRatio,
+    this.priceToBookRatio,
+    this.fundamentalNote,
+  });
+
+  final Stock stock;
+  final double score;
+  final List<String> rationale;
+  final String? webSummary;
+  final double? priceToEarningsRatio;
+  final double? priceToBookRatio;
+  final String? fundamentalNote;
+
+  factory MarketIdea.fromJson(Map<String, dynamic> json) {
+    final rationaleJson = json['rationale'] as List<dynamic>? ?? const [];
+    return MarketIdea(
+      stock: Stock.fromJson(json['stock'] as Map<String, dynamic>),
+      score: asDouble(json['score']) ?? 0,
+      rationale: rationaleJson.map((item) => item.toString()).toList(),
+      webSummary: json['web_summary'] as String?,
+      priceToEarningsRatio: asDouble(json['price_to_earnings_ratio']),
+      priceToBookRatio: asDouble(json['price_to_book_ratio']),
+      fundamentalNote: json['fundamental_note'] as String?,
+    );
+  }
+}
+
+class MarketIdeasBundle {
+  MarketIdeasBundle({
+    required this.disclaimer,
+    required this.ideas,
+    this.generatedAt,
+  });
+
+  final String disclaimer;
+  final List<MarketIdea> ideas;
+  final DateTime? generatedAt;
+
+  factory MarketIdeasBundle.fromJson(Map<String, dynamic> json) {
+    final ideasJson = json['ideas'] as List<dynamic>? ?? const [];
+    return MarketIdeasBundle(
+      disclaimer: json['disclaimer']?.toString() ?? '',
+      ideas: ideasJson
+          .map((item) => MarketIdea.fromJson(item as Map<String, dynamic>))
+          .toList(),
+      generatedAt: json['generated_at'] == null
+          ? null
+          : DateTime.tryParse(json['generated_at'] as String),
     );
   }
 }
@@ -1450,7 +1519,9 @@ class _AuthScreenState extends State<AuthScreen> {
     super.initState();
     landingRefreshTimer = Timer.periodic(const Duration(seconds: 45), (_) {
       if (!mounted) return;
-      setState(() => landingFuture = _loadLandingData());
+      setState(() {
+        landingFuture = _loadLandingData();
+      });
     });
     marketMotionTimer = Timer.periodic(const Duration(seconds: 4), (_) {
       if (!mounted) return;
@@ -1690,7 +1761,9 @@ class _AuthScreenState extends State<AuthScreen> {
 
                   return RefreshIndicator(
                     onRefresh: () async {
-                      setState(() => landingFuture = _loadLandingData());
+                      setState(() {
+                        landingFuture = _loadLandingData();
+                      });
                       await landingFuture;
                     },
                     child: ListView(
@@ -3241,7 +3314,9 @@ class _DashboardShellState extends State<DashboardShell> {
             userFuture: userFuture,
             onSignOut: widget.onSignOut,
             onProfileChanged: () {
-              setState(() => userFuture = widget.api.me());
+              setState(() {
+                userFuture = widget.api.me();
+              });
             },
             pushSetupFuture: pushSetupFuture,
           ),
@@ -3309,7 +3384,7 @@ class _DashboardShellState extends State<DashboardShell> {
         return Scaffold(
           appBar: AppBar(
             title: Text(
-              user == null ? 'NGX Portfolio' : 'Welcome, ${user.firstName}',
+              user == null ? 'Stockfolio' : 'Welcome, ${user.firstName}',
             ),
             actions: [
               if (sessionCountdownLabel != null)
@@ -3408,9 +3483,12 @@ class VersionLabel extends StatelessWidget {
         future: packageInfoFuture,
         builder: (context, snapshot) {
           final info = snapshot.data;
-          final packageVersion = info == null || info.version.isEmpty
+          final packageVersion =
+              info == null ||
+                  info.version.isEmpty ||
+                  info.buildNumber.isEmpty
               ? null
-              : '${info.version}+${info.buildNumber}';
+              : '${info.version}.${info.buildNumber}';
           final version = packageVersion ?? appDisplayVersion;
           return Padding(
             padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
@@ -3445,6 +3523,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   late Future<List<Holding>> holdingsFuture = widget.api.holdings();
   late Future<MarketLeaders> leadersFuture = widget.api.marketLeaders();
+  late Future<MarketIdeasBundle> ideasFuture = widget.api.marketIdeas();
   Timer? refreshTimer;
 
   @override
@@ -3465,6 +3544,7 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {
       holdingsFuture = widget.api.holdings();
       leadersFuture = widget.api.marketLeaders();
+      ideasFuture = widget.api.marketIdeas();
     });
   }
 
@@ -3610,6 +3690,27 @@ class _HomeScreenState extends State<HomeScreen> {
                       );
                     },
                   );
+                },
+              ),
+              const SizedBox(height: 16),
+              FutureBuilder<MarketIdeasBundle>(
+                future: ideasFuture,
+                builder: (context, ideasSnapshot) {
+                  final ideas = ideasSnapshot.data;
+                  if (ideas == null &&
+                      ideasSnapshot.connectionState ==
+                          ConnectionState.waiting) {
+                    return const Card(
+                      child: Padding(
+                        padding: EdgeInsets.all(16),
+                        child: LinearProgressIndicator(),
+                      ),
+                    );
+                  }
+                  if (ideas == null || ideas.ideas.isEmpty) {
+                    return const SizedBox.shrink();
+                  }
+                  return MarketIdeasPanel(bundle: ideas);
                 },
               ),
             ],
@@ -4903,6 +5004,8 @@ class _StocksScreenState extends State<StocksScreen> {
   Stock? selectedStock;
   Future<StockDetailBundle>? selectedDetailFuture;
   Timer? refreshTimer;
+  Timer? searchDebounce;
+  String? searchHint;
 
   @override
   void initState() {
@@ -4915,6 +5018,7 @@ class _StocksScreenState extends State<StocksScreen> {
   @override
   void dispose() {
     refreshTimer?.cancel();
+    searchDebounce?.cancel();
     search.dispose();
     super.dispose();
   }
@@ -4952,6 +5056,21 @@ class _StocksScreenState extends State<StocksScreen> {
     }
   }
 
+  void onSearchChanged(String value) {
+    searchDebounce?.cancel();
+    final trimmed = value.trim();
+    if (trimmed.isNotEmpty && trimmed.length < 3) {
+      setState(() {
+        searchHint = 'Enter at least 3 characters to see suggestions.';
+      });
+      return;
+    }
+    setState(() {
+      searchHint = null;
+    });
+    searchDebounce = Timer(const Duration(milliseconds: 250), refresh);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -4963,10 +5082,12 @@ class _StocksScreenState extends State<StocksScreen> {
               Expanded(
                 child: TextField(
                   controller: search,
+                  onChanged: onSearchChanged,
                   onSubmitted: (_) => refresh(),
-                  decoration: const InputDecoration(
-                    prefixIcon: Icon(Icons.search),
+                  decoration: InputDecoration(
+                    prefixIcon: const Icon(Icons.search),
                     labelText: 'Search stocks',
+                    helperText: searchHint ?? 'Suggestions start after 3 characters.',
                   ),
                 ),
               ),
@@ -6343,6 +6464,162 @@ class MarketLeaderPanel extends StatelessWidget {
                   ),
                 ),
               ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class MarketIdeasPanel extends StatelessWidget {
+  const MarketIdeasPanel({super.key, required this.bundle});
+
+  final MarketIdeasBundle bundle;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.insights_outlined,
+                  color: theme.colorScheme.primary,
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  'Potential buy setups',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              bundle.disclaimer,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 14),
+            ...bundle.ideas.map(
+              (idea) => Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.28),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: theme.colorScheme.outlineVariant,
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  idea.stock.symbol,
+                                  style: theme.textTheme.titleSmall?.copyWith(
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                if ((idea.stock.name ?? '').isNotEmpty)
+                                  Text(
+                                    idea.stock.name!,
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color: theme.colorScheme.onSurfaceVariant,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: theme.colorScheme.primaryContainer,
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: Text(
+                              'Score ${idea.score.toStringAsFixed(1)}',
+                              style: theme.textTheme.labelMedium?.copyWith(
+                                color: theme.colorScheme.onPrimaryContainer,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: idea.rationale
+                            .map(
+                              (reason) => Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 6,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: theme.colorScheme.surface,
+                                  borderRadius: BorderRadius.circular(999),
+                                  border: Border.all(
+                                    color: theme.colorScheme.outlineVariant,
+                                  ),
+                                ),
+                                child: Text(
+                                  reason,
+                                  style: theme.textTheme.labelMedium,
+                                ),
+                              ),
+                            )
+                            .toList(),
+                      ),
+                      if (idea.webSummary != null && idea.webSummary!.isNotEmpty) ...[
+                        const SizedBox(height: 10),
+                        Text(
+                          'Latest company update',
+                          style: theme.textTheme.labelLarge?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          idea.webSummary!,
+                          style: theme.textTheme.bodyMedium,
+                        ),
+                      ],
+                      if (idea.fundamentalNote != null &&
+                          idea.fundamentalNote!.isNotEmpty) ...[
+                        const SizedBox(height: 10),
+                        Text(
+                          idea.fundamentalNote!,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ),
           ],
         ),
       ),
