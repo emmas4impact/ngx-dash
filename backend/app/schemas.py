@@ -204,6 +204,8 @@ class MarketLeadersOut(BaseModel):
 class MarketIdeaOut(BaseModel):
     stock: StockOut
     score: float
+    one_year_growth_percent: float | None = None
+    stocks_analyzed: int | None = None
     rationale: list[str] = []
     web_summary: str | None = None
     price_to_earnings_ratio: float | None = None
@@ -214,6 +216,7 @@ class MarketIdeaOut(BaseModel):
 class MarketIdeasOut(BaseModel):
     disclaimer: str
     generated_at: datetime | None = None
+    stocks_analyzed: int = 0
     ideas: list[MarketIdeaOut]
 
 

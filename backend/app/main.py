@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session, selectinload
 from .auth import create_access_token, get_current_superuser, get_current_user, hash_password, verify_password
 from .database import Base, SessionLocal, engine, get_db
 from .legal import render_account_deletion_html, render_privacy_policy_html
-from .models import AccountDeletionRequest, PortfolioHolding, PushDeviceToken, Stock, User
+from .models import AccountDeletionRequest, PortfolioHolding, PushDeviceToken, Stock, StockPrice, User
 from .notifications import portfolio_report_pdf, send_email
 from .ngx_client import (
     NgxFetchError,
@@ -183,8 +183,27 @@ def market_ideas_payload(db: Session, limit: int) -> dict:
         return {
             "disclaimer": MARKET_IDEAS_DISCLAIMER,
             "generated_at": datetime.now(timezone.utc),
+            "stocks_analyzed": 0,
             "ideas": [],
         }
+
+    one_year_since = date.today() - relativedelta(years=1)
+    history_rows = list(
+        db.scalars(
+            select(StockPrice)
+            .where(StockPrice.trade_date >= one_year_since)
+            .order_by(StockPrice.stock_symbol, StockPrice.trade_date)
+        ).all()
+    )
+    history_by_symbol: dict[str, tuple[float, float]] = {}
+    for row in history_rows:
+        symbol = row.stock_symbol
+        close_price = float(row.close_price)
+        if symbol not in history_by_symbol:
+            history_by_symbol[symbol] = (close_price, close_price)
+        else:
+            first_close, _ = history_by_symbol[symbol]
+            history_by_symbol[symbol] = (first_close, close_price)
 
     volumes = sorted(float(stock.volume) for stock in stocks if stock.volume is not None and float(stock.volume) > 0)
     market_caps = sorted(
@@ -206,16 +225,24 @@ def market_ideas_payload(db: Session, limit: int) -> dict:
         close_strength = 0.0
         if stock.previous_close is not None and current_price > float(stock.previous_close):
             close_strength = 1.0
+        growth_tuple = history_by_symbol.get(stock.symbol)
+        one_year_growth_percent: float | None = None
+        if growth_tuple is not None and growth_tuple[0] > 0:
+            one_year_growth_percent = ((growth_tuple[1] - growth_tuple[0]) / growth_tuple[0]) * 100
 
         score = max(0.0, min(intraday_change, 10.0)) * 4.0
         score += volume_score * 25.0
         score += market_cap_score * 15.0
         score += margin_score * 10.0
         score += close_strength * 10.0
+        if one_year_growth_percent is not None:
+            score += max(-10.0, min(one_year_growth_percent, 40.0)) * 0.7
 
         rationale: list[str] = []
         if intraday_change > 0:
             rationale.append(f"Positive intraday momentum of {intraday_change:.2f}% from the open.")
+        if one_year_growth_percent is not None:
+            rationale.append(f"One-year price growth is {one_year_growth_percent:.2f}%.")
         if volume_score >= 0.75:
             rationale.append("Trading volume is in the top quartile of the tracked market.")
         if market_cap_score >= 0.75:
@@ -231,6 +258,8 @@ def market_ideas_payload(db: Session, limit: int) -> dict:
             {
                 "stock": StockOut.model_validate(stock).model_dump(),
                 "score": round(score, 2),
+                "one_year_growth_percent": None if one_year_growth_percent is None else round(one_year_growth_percent, 2),
+                "stocks_analyzed": len(stocks),
                 "rationale": rationale[:4],
                 "web_summary": None,
                 "price_to_earnings_ratio": None,
@@ -258,12 +287,22 @@ def market_ideas_payload(db: Session, limit: int) -> dict:
                         *candidate["rationale"],
                         "Recent company update/disclosure is available from NGX sources.",
                     ][:5]
+                    latest_title = (latest.get("title") or "").lower()
+                    if any(
+                        keyword in latest_title
+                        for keyword in ("audited", "annual report", "financial statement", "q1", "q2", "q3", "q4")
+                    ):
+                        candidate["rationale"] = [
+                            *candidate["rationale"],
+                            "Latest filing references recent financial statements from the previous reporting period.",
+                        ][:5]
         enriched.append(candidate)
 
     enriched.sort(key=lambda item: (item["score"], item["stock"]["symbol"]), reverse=True)
     return {
         "disclaimer": MARKET_IDEAS_DISCLAIMER,
         "generated_at": datetime.now(timezone.utc),
+        "stocks_analyzed": len(stocks),
         "ideas": enriched[:limit],
     }
 

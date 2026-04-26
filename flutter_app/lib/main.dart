@@ -22,6 +22,7 @@ final apiBaseUrl = normalizeApiBaseUrl(configuredApiBaseUrl());
 const _themeModePreferenceKey = 'theme_mode';
 const _webSessionDeadlineKey = 'web_session_deadline_ms';
 const _webSessionExtendedKey = 'web_session_extended';
+const _financialPrivacyPreferenceKey = 'financial_privacy_hidden';
 const _seedColor = Color(0xFF0E7C66);
 const _darkScaffold = Color(0xFF0B1215);
 const _darkSurface = Color(0xFF101A1E);
@@ -1050,6 +1051,8 @@ class MarketIdea {
   MarketIdea({
     required this.stock,
     required this.score,
+    this.oneYearGrowthPercent,
+    this.stocksAnalyzed,
     required this.rationale,
     this.webSummary,
     this.priceToEarningsRatio,
@@ -1059,6 +1062,8 @@ class MarketIdea {
 
   final Stock stock;
   final double score;
+  final double? oneYearGrowthPercent;
+  final int? stocksAnalyzed;
   final List<String> rationale;
   final String? webSummary;
   final double? priceToEarningsRatio;
@@ -1070,6 +1075,8 @@ class MarketIdea {
     return MarketIdea(
       stock: Stock.fromJson(json['stock'] as Map<String, dynamic>),
       score: asDouble(json['score']) ?? 0,
+      oneYearGrowthPercent: asDouble(json['one_year_growth_percent']),
+      stocksAnalyzed: (json['stocks_analyzed'] as num?)?.toInt(),
       rationale: rationaleJson.map((item) => item.toString()).toList(),
       webSummary: json['web_summary'] as String?,
       priceToEarningsRatio: asDouble(json['price_to_earnings_ratio']),
@@ -1083,11 +1090,13 @@ class MarketIdeasBundle {
   MarketIdeasBundle({
     required this.disclaimer,
     required this.ideas,
+    required this.stocksAnalyzed,
     this.generatedAt,
   });
 
   final String disclaimer;
   final List<MarketIdea> ideas;
+  final int stocksAnalyzed;
   final DateTime? generatedAt;
 
   factory MarketIdeasBundle.fromJson(Map<String, dynamic> json) {
@@ -1097,6 +1106,7 @@ class MarketIdeasBundle {
       ideas: ideasJson
           .map((item) => MarketIdea.fromJson(item as Map<String, dynamic>))
           .toList(),
+      stocksAnalyzed: (json['stocks_analyzed'] as num?)?.toInt() ?? 0,
       generatedAt: json['generated_at'] == null
           ? null
           : DateTime.tryParse(json['generated_at'] as String),
@@ -3083,6 +3093,7 @@ class _DashboardShellState extends State<DashboardShell> {
   DateTime? webSessionDeadline;
   bool webSessionExtended = false;
   bool sessionPromptOpen = false;
+  bool hideFinancialValues = false;
 
   @override
   void initState() {
@@ -3099,6 +3110,7 @@ class _DashboardShellState extends State<DashboardShell> {
         (_) => _handleWebSessionTick(),
       );
     }
+    Future<void>.delayed(Duration.zero, _loadFinancialPrivacyState);
     pushMessageSubscription = PushNotifications.instance.messages.listen(
       _showPushMessage,
     );
@@ -3133,6 +3145,25 @@ class _DashboardShellState extends State<DashboardShell> {
       webSessionExtended = extended;
     });
     _handleWebSessionTick();
+  }
+
+  Future<void> _loadFinancialPrivacyState() async {
+    final prefs = await SharedPreferences.getInstance();
+    final hidden = prefs.getBool(_financialPrivacyPreferenceKey) ?? false;
+    if (!mounted) return;
+    setState(() {
+      hideFinancialValues = hidden;
+    });
+  }
+
+  Future<void> _toggleFinancialPrivacy() async {
+    final next = !hideFinancialValues;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_financialPrivacyPreferenceKey, next);
+    if (!mounted) return;
+    setState(() {
+      hideFinancialValues = next;
+    });
   }
 
   Future<void> _handleWebSessionTick() async {
@@ -3305,8 +3336,17 @@ class _DashboardShellState extends State<DashboardShell> {
         final user = snapshot.data;
         final isAdmin = user?.isSuperuser ?? false;
         final screens = [
-          HomeScreen(user: user, api: widget.api),
-          PortfolioScreen(api: widget.api),
+          HomeScreen(
+            user: user,
+            api: widget.api,
+            hideFinancialValues: hideFinancialValues,
+            onToggleFinancialPrivacy: _toggleFinancialPrivacy,
+          ),
+          PortfolioScreen(
+            api: widget.api,
+            hideFinancialValues: hideFinancialValues,
+            onToggleFinancialPrivacy: _toggleFinancialPrivacy,
+          ),
           StocksScreen(api: widget.api),
           ChartsScreen(api: widget.api),
           AccountScreen(
@@ -3511,10 +3551,18 @@ class VersionLabel extends StatelessWidget {
 }
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key, required this.user, required this.api});
+  const HomeScreen({
+    super.key,
+    required this.user,
+    required this.api,
+    required this.hideFinancialValues,
+    required this.onToggleFinancialPrivacy,
+  });
 
   final AppUser? user;
   final ApiClient api;
+  final bool hideFinancialValues;
+  final Future<void> Function() onToggleFinancialPrivacy;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -3596,6 +3644,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 holdingCount: holdings.length,
                 bestHolding: bestHolding,
                 weakestHolding: weakestHolding,
+                hideFinancialValues: widget.hideFinancialValues,
+                onToggleVisibility: widget.onToggleFinancialPrivacy,
               ),
               const SizedBox(height: 18),
               Text(
@@ -4354,9 +4404,16 @@ class _AccountScreenState extends State<AccountScreen> {
 }
 
 class PortfolioScreen extends StatefulWidget {
-  const PortfolioScreen({super.key, required this.api});
+  const PortfolioScreen({
+    super.key,
+    required this.api,
+    required this.hideFinancialValues,
+    required this.onToggleFinancialPrivacy,
+  });
 
   final ApiClient api;
+  final bool hideFinancialValues;
+  final Future<void> Function() onToggleFinancialPrivacy;
 
   @override
   State<PortfolioScreen> createState() => _PortfolioScreenState();
@@ -4459,21 +4516,37 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
                 children: [
                   MetricCard(
                     label: 'Portfolio value',
-                    value: moneyFormat.format(totalValue),
+                    value: widget.hideFinancialValues
+                        ? 'XXXXXX'
+                        : moneyFormat.format(totalValue),
                     icon: Icons.payments,
                   ),
                   MetricCard(
                     label: 'Amount invested',
-                    value: moneyFormat.format(totalCost),
+                    value: widget.hideFinancialValues
+                        ? 'XXXXXX'
+                        : moneyFormat.format(totalCost),
                     icon: Icons.savings,
                   ),
                   MetricCard(
                     label: 'Profit / loss',
-                    value: moneyFormat.format(profitLoss),
+                    value: widget.hideFinancialValues
+                        ? 'XXXXXX'
+                        : moneyFormat.format(profitLoss),
                     icon: profitLoss >= 0
                         ? Icons.trending_up
                         : Icons.trending_down,
                     positive: profitLoss >= 0,
+                  ),
+                  MetricCard(
+                    label: widget.hideFinancialValues
+                        ? 'Reveal totals'
+                        : 'Hide totals',
+                    value: widget.hideFinancialValues ? 'Tap to show' : 'Tap to hide',
+                    icon: widget.hideFinancialValues
+                        ? Icons.visibility_outlined
+                        : Icons.visibility_off_outlined,
+                    onTap: widget.onToggleFinancialPrivacy,
                   ),
                 ],
               ),
@@ -5083,7 +5156,17 @@ class _StocksScreenState extends State<StocksScreen> {
                 child: TextField(
                   controller: search,
                   onChanged: onSearchChanged,
-                  onSubmitted: (_) => refresh(),
+                  onSubmitted: (_) {
+                    final trimmed = search.text.trim();
+                    if (trimmed.isEmpty || trimmed.length >= 3) {
+                      refresh();
+                    } else {
+                      setState(() {
+                        searchHint =
+                            'Enter at least 3 characters to see suggestions.';
+                      });
+                    }
+                  },
                   decoration: InputDecoration(
                     prefixIcon: const Icon(Icons.search),
                     labelText: 'Search stocks',
@@ -6115,6 +6198,8 @@ class _PortfolioOverviewHero extends StatelessWidget {
     required this.holdingCount,
     required this.bestHolding,
     required this.weakestHolding,
+    required this.hideFinancialValues,
+    required this.onToggleVisibility,
   });
 
   final double totalValue;
@@ -6123,6 +6208,8 @@ class _PortfolioOverviewHero extends StatelessWidget {
   final int holdingCount;
   final Holding? bestHolding;
   final Holding? weakestHolding;
+  final bool hideFinancialValues;
+  final Future<void> Function() onToggleVisibility;
 
   @override
   Widget build(BuildContext context) {
@@ -6200,18 +6287,30 @@ class _PortfolioOverviewHero extends StatelessWidget {
                 backgroundColor: accent.withValues(alpha: 0.12),
                 side: BorderSide(color: accent.withValues(alpha: 0.2)),
               ),
+              const SizedBox(width: 8),
+              IconButton.filledTonal(
+                onPressed: onToggleVisibility,
+                tooltip: hideFinancialValues ? 'Reveal totals' : 'Hide totals',
+                icon: Icon(
+                  hideFinancialValues
+                      ? Icons.visibility_outlined
+                      : Icons.visibility_off_outlined,
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 22),
           Text(
-            moneyFormat.format(totalValue),
+            hideFinancialValues ? 'XXXXXX' : moneyFormat.format(totalValue),
             style: theme.textTheme.headlineMedium?.copyWith(
               fontWeight: FontWeight.w800,
             ),
           ),
           const SizedBox(height: 8),
           Text(
-            '${positive ? '+' : '-'}${moneyFormat.format(profitLoss.abs())} unrealized ${positive ? 'gain' : 'loss'}',
+            hideFinancialValues
+                ? 'XXXXXX unrealized ${positive ? 'gain' : 'loss'}'
+                : '${positive ? '+' : '-'}${moneyFormat.format(profitLoss.abs())} unrealized ${positive ? 'gain' : 'loss'}',
             style: theme.textTheme.titleMedium?.copyWith(
               color: accent,
               fontWeight: FontWeight.w700,
@@ -6302,12 +6401,14 @@ class MetricCard extends StatelessWidget {
     required this.value,
     required this.icon,
     this.positive,
+    this.onTap,
   });
 
   final String label;
   final String value;
   final IconData icon;
   final bool? positive;
+  final Future<void> Function()? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -6318,40 +6419,44 @@ class MetricCard extends StatelessWidget {
     return SizedBox(
       width: 260,
       child: Card(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              CircleAvatar(
-                backgroundColor: color.withValues(alpha: 0.12),
-                child: Icon(icon, color: color),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      label,
-                      style: theme.textTheme.labelMedium?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    FittedBox(
-                      fit: BoxFit.scaleDown,
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        value,
-                        style: theme.textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.w700,
+        child: InkWell(
+          onTap: onTap == null ? null : () => onTap!.call(),
+          borderRadius: BorderRadius.circular(12),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                CircleAvatar(
+                  backgroundColor: color.withValues(alpha: 0.12),
+                  child: Icon(icon, color: color),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        label,
+                        style: theme.textTheme.labelMedium?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
                         ),
                       ),
-                    ),
-                  ],
+                      const SizedBox(height: 4),
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          value,
+                          style: theme.textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -6496,6 +6601,13 @@ class MarketIdeasPanel extends StatelessWidget {
                   'Potential buy setups',
                   style: theme.textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const Spacer(),
+                Text(
+                  'Analyzing ${bundle.stocksAnalyzed} NGX stocks',
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
                   ),
                 ),
               ],
