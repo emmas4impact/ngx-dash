@@ -678,9 +678,9 @@ class ApiClient {
     _expect(response, 204);
   }
 
-  Future<List<PricePoint>> history(String symbol) async {
+  Future<List<PricePoint>> history(String symbol, {int months = 12}) async {
     final response = await _client.get(
-      _uri('/stocks/$symbol/history', {'months': '12'}),
+      _uri('/stocks/$symbol/history', {'months': '$months'}),
       headers: _headers,
     );
     _expect(response, 200);
@@ -728,6 +728,13 @@ class ApiClient {
     final message = data['message']?.toString();
     if (status != 'success' && message != null && message.isNotEmpty) {
       return message;
+    }
+    final historyRows = (data['history_rows_upserted'] as num?)?.toInt() ?? 0;
+    if (includeHistory) {
+      return 'Synced ${data['stocks_upserted']} stocks from ${data['source']} and refreshed $historyRows history rows';
+    }
+    if (historyRows > 0) {
+      return 'Synced ${data['stocks_upserted']} stocks from ${data['source']} and updated $historyRows daily snapshots';
     }
     return 'Synced ${data['stocks_upserted']} stocks from ${data['source']}';
   }
@@ -5252,15 +5259,45 @@ class ChartsScreen extends StatefulWidget {
 }
 
 class _ChartsScreenState extends State<ChartsScreen> {
+  static const List<int> rangeOptionsMonths = [3, 6, 12, 24];
+
   late Future<List<Stock>> stocksFuture = widget.api.stocks();
   Future<List<PricePoint>>? historyFuture;
   String? selectedSymbol;
+  int selectedRangeMonths = 12;
 
   void selectStock(String? symbol) {
     setState(() {
       selectedSymbol = symbol;
-      historyFuture = symbol == null ? null : widget.api.history(symbol);
+      historyFuture = symbol == null
+          ? null
+          : widget.api.history(symbol, months: selectedRangeMonths);
     });
+  }
+
+  void selectRange(int months) {
+    if (months == selectedRangeMonths) return;
+    setState(() {
+      selectedRangeMonths = months;
+      historyFuture = selectedSymbol == null
+          ? null
+          : widget.api.history(selectedSymbol!, months: selectedRangeMonths);
+    });
+  }
+
+  String rangeLabel(int months) {
+    switch (months) {
+      case 3:
+        return '3M';
+      case 6:
+        return '6M';
+      case 12:
+        return '1Y';
+      case 24:
+        return '2Y';
+      default:
+        return '${months}M';
+    }
   }
 
   @override
@@ -5283,7 +5320,10 @@ class _ChartsScreenState extends State<ChartsScreen> {
         if (selectedSymbol == null ||
             !stocks.any((stock) => stock.symbol == selectedSymbol)) {
           selectedSymbol = stocks.first.symbol;
-          historyFuture = widget.api.history(selectedSymbol!);
+          historyFuture = widget.api.history(
+            selectedSymbol!,
+            months: selectedRangeMonths,
+          );
         }
         return ListView(
           padding: const EdgeInsets.all(16),
@@ -5303,6 +5343,27 @@ class _ChartsScreenState extends State<ChartsScreen> {
                   )
                   .toList(),
               onChanged: selectStock,
+            ),
+            const SizedBox(height: 16),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: rangeOptionsMonths
+                  .map(
+                    (months) => ChoiceChip(
+                      label: Text(rangeLabel(months)),
+                      selected: selectedRangeMonths == months,
+                      onSelected: (_) => selectRange(months),
+                    ),
+                  )
+                  .toList(),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'NGX public history currently backfills about 1 year. The 2Y view will deepen automatically as daily snapshots continue to accumulate in your database.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
             const SizedBox(height: 16),
             SizedBox(
@@ -5326,9 +5387,10 @@ class _ChartsScreenState extends State<ChartsScreen> {
                             }
                             final points = historySnapshot.data ?? [];
                             if (points.isEmpty) {
-                              return const EmptyState(
+                              return EmptyState(
                                 icon: Icons.show_chart,
-                                text: 'No one-year history available.',
+                                text:
+                                    'No history available for the selected ${rangeLabel(selectedRangeMonths)} range yet.',
                               );
                             }
                             return PriceChart(points: points);
@@ -5366,6 +5428,7 @@ class _AdminScreenState extends State<AdminScreen> {
       .api
       .accountDeletionRequests();
   bool syncing = false;
+  bool backfillingHistory = false;
   bool sendingTestPush = false;
 
   void refresh() {
@@ -5390,6 +5453,19 @@ class _AdminScreenState extends State<AdminScreen> {
     }
   }
 
+  Future<void> backfillHistory() async {
+    setState(() => backfillingHistory = true);
+    try {
+      final message = await widget.api.syncStocks(includeHistory: true);
+      refresh();
+      if (mounted) showMessage(context, message);
+    } catch (error) {
+      if (mounted) showError(context, error.toString());
+    } finally {
+      if (mounted) setState(() => backfillingHistory = false);
+    }
+  }
+
   Future<void> sendTestPush() async {
     setState(() => sendingTestPush = true);
     try {
@@ -5410,18 +5486,31 @@ class _AdminScreenState extends State<AdminScreen> {
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          Align(
-            alignment: Alignment.centerLeft,
-            child: FilledButton.icon(
-              onPressed: syncing ? null : sync,
-              icon: syncing
-                  ? const SizedBox.square(
-                      dimension: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.sync),
-              label: const Text('Sync NGX stocks'),
-            ),
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: [
+              FilledButton.icon(
+                onPressed: syncing ? null : sync,
+                icon: syncing
+                    ? const SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.sync),
+                label: const Text('Sync NGX stocks'),
+              ),
+              OutlinedButton.icon(
+                onPressed: backfillingHistory ? null : backfillHistory,
+                icon: backfillingHistory
+                    ? const SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.history),
+                label: const Text('Backfill 1Y history'),
+              ),
+            ],
           ),
           const SizedBox(height: 12),
           FutureBuilder<SyncStatus>(
