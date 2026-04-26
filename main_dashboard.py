@@ -16,7 +16,7 @@ from data_loader import load_live_data_from_gsheet, fetch_historical_data, fetch
 from refresh_utils import check_auto_refresh_conditions
 
 st.set_page_config(layout="wide")
-st.title("📈 NGX Portfolio Dashboard")
+st.title("📈 Stockfolio Portfolio Dashboard")
 
 market_status = fetch_market_status()
 st.subheader(f"Market Status: {market_status}")

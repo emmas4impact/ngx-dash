@@ -44,9 +44,15 @@ def main() -> None:
     APP_VERSION.write_text(
         "\n".join(
             [
-                f"const appVersionName = '{major}.{minor}.{patch}';",
-                f"const appBuildNumber = '{build}';",
-                f"const appDisplayVersion = '{major}.{minor}.{patch}+{build}';",
+                "const appVersionName = String.fromEnvironment(",
+                "  'APP_VERSION_NAME',",
+                f"  defaultValue: '{major}.{minor}.{patch}',",
+                ");",
+                "const appBuildNumber = String.fromEnvironment(",
+                "  'APP_BUILD_NUMBER',",
+                f"  defaultValue: '{build}',",
+                ");",
+                "const appDisplayVersion = '$appVersionName.$appBuildNumber';",
                 "",
             ]
         ),

@@ -133,10 +133,10 @@ def _resend_error_message(response: requests.Response) -> str:
 
 def portfolio_report_pdf(user: User, holdings: list[dict]) -> bytes:
     buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4, title="NGX Portfolio Report")
+    doc = SimpleDocTemplate(buffer, pagesize=A4, title="Stockfolio Report")
     styles = getSampleStyleSheet()
     story = [
-        Paragraph("NGX Portfolio Report", styles["Title"]),
+        Paragraph("Stockfolio Report", styles["Title"]),
         Paragraph(f"Investor: {user.full_name or user.email}", styles["Normal"]),
         Paragraph(f"Email: {user.email}", styles["Normal"]),
         Paragraph(f"Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}", styles["Normal"]),

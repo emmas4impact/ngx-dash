@@ -1,1 +1,1 @@
-"""Backend package for the NGX portfolio API."""
+"""Backend package for the Stockfolio API."""
