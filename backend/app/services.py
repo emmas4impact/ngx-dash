@@ -81,6 +81,7 @@ def sync_stocks(db: Session, include_history: bool = False) -> tuple[str, int, i
         stock = upsert_stock(db, stock_data)
         if include_history and stock.ngx_id:
             history_count += upsert_stock_history(db, stock.symbol, stock.ngx_id)
+        history_count += upsert_daily_stock_snapshot(db, stock)
 
     record_sync_log(
         db,
@@ -191,6 +192,40 @@ def upsert_stock_history(db: Session, symbol: str, ngx_id: str) -> int:
         db.execute(stmt)
         count += 1
     return count
+
+
+def upsert_daily_stock_snapshot(db: Session, stock: Stock) -> int:
+    if stock.last_price is None:
+        return 0
+
+    snapshot_close = float(stock.last_price)
+    snapshot_open = float(stock.open_price or stock.previous_close or stock.last_price)
+    snapshot_high = float(stock.high_price) if stock.high_price is not None else snapshot_close
+    snapshot_low = float(stock.low_price) if stock.low_price is not None else snapshot_close
+    snapshot_volume = float(stock.volume) if stock.volume is not None else None
+
+    base_insert = insert(StockPrice).values(
+        stock_symbol=stock.symbol,
+        trade_date=date.today(),
+        open_price=snapshot_open,
+        high_price=snapshot_high,
+        low_price=snapshot_low,
+        close_price=snapshot_close,
+        volume=snapshot_volume,
+    )
+    stmt = base_insert.on_conflict_do_update(
+        constraint="uq_stock_prices_symbol_date",
+        set_={
+            "open_price": base_insert.excluded.open_price,
+            "high_price": base_insert.excluded.high_price,
+            "low_price": base_insert.excluded.low_price,
+            "close_price": base_insert.excluded.close_price,
+            "volume": base_insert.excluded.volume,
+            "updated_at": func.now(),
+        },
+    )
+    db.execute(stmt)
+    return 1
 
 
 def holding_to_dict(holding: PortfolioHolding) -> dict:
