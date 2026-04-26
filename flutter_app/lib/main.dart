@@ -4524,21 +4524,21 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
                   MetricCard(
                     label: 'Portfolio value',
                     value: widget.hideFinancialValues
-                        ? 'XXXXXX'
+                        ? '*****'
                         : moneyFormat.format(totalValue),
                     icon: Icons.payments,
                   ),
                   MetricCard(
                     label: 'Amount invested',
                     value: widget.hideFinancialValues
-                        ? 'XXXXXX'
+                        ? '*****'
                         : moneyFormat.format(totalCost),
                     icon: Icons.savings,
                   ),
                   MetricCard(
                     label: 'Profit / loss',
                     value: widget.hideFinancialValues
-                        ? 'XXXXXX'
+                        ? '*****'
                         : moneyFormat.format(profitLoss),
                     icon: profitLoss >= 0
                         ? Icons.trending_up
@@ -6390,7 +6390,7 @@ class _PortfolioOverviewHero extends StatelessWidget {
           ),
           const SizedBox(height: 22),
           Text(
-            hideFinancialValues ? 'XXXXXX' : moneyFormat.format(totalValue),
+            hideFinancialValues ? '*****' : moneyFormat.format(totalValue),
             style: theme.textTheme.headlineMedium?.copyWith(
               fontWeight: FontWeight.w800,
             ),
@@ -6398,7 +6398,7 @@ class _PortfolioOverviewHero extends StatelessWidget {
           const SizedBox(height: 8),
           Text(
             hideFinancialValues
-                ? 'XXXXXX unrealized ${positive ? 'gain' : 'loss'}'
+                ? '***** unrealized ${positive ? 'gain' : 'loss'}'
                 : '${positive ? '+' : '-'}${moneyFormat.format(profitLoss.abs())} unrealized ${positive ? 'gain' : 'loss'}',
             style: theme.textTheme.titleMedium?.copyWith(
               color: accent,

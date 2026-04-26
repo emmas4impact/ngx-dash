@@ -101944,7 +101944,7 @@ A.aDD.prototype={
 $1(a){return new A.oK(this.a,null,null)},
 $S:233}
 A.aDO.prototype={
-$2(a,a0){var s,r,q,p,o,n,m,l,k,j,i,h,g,f,e,d=null,c="XXXXXX",b=a0.b
+$2(a,a0){var s,r,q,p,o,n,m,l,k,j,i,h,g,f,e,d=null,c="*****",b=a0.b
 if(b==null)b=A.c([],t.YS)
 s=J.cL(b)
 r=s.kO(b,0,new A.aDI())
@@ -102691,10 +102691,10 @@ k=A.aPS(e,r.ce(0.12),k,new A.aI(r.ce(0.2),1,B.q,-1))
 h=f.x
 g=h?"Reveal totals":"Hide totals"
 n=A.cj(A.c([n,B.oE,j,k,B.ff,A.aLL(A.dH(h?B.rP:B.rO,e,e,e),f.y,g)],i),B.B,B.n,B.o,0)
-k=h?"XXXXXX":$.er().c5(f.c)
+k=h?"*****":$.er().c5(f.c)
 o=o.e
 o=A.a5(k,e,e,e,e,o==null?e:o.i2(B.mC),e,e)
-if(h)b="XXXXXX unrealized "+(a?"gain":"loss")
+if(h)b="***** unrealized "+(a?"gain":"loss")
 else{k=a?"+":"-"
 b=$.er().c5(Math.abs(b))
 j=a?"gain":"loss"
