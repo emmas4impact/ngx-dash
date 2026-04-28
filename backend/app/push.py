@@ -13,7 +13,7 @@ from .models import PortfolioAlertState, PortfolioHolding, PushDeviceToken, User
 from .settings import Settings
 
 
-logger = logging.getLogger("ngx_dash")
+logger = logging.getLogger("stockfoliong")
 FCM_SCOPES = ["https://www.googleapis.com/auth/firebase.messaging"]
 
 
@@ -78,9 +78,6 @@ def send_push_message(
             "data": data or {},
             "android": {
                 "priority": "high",
-                "notification": {
-                    "click_action": "FLUTTER_NOTIFICATION_CLICK",
-                },
             },
             "apns": {
                 "headers": {
