@@ -40,9 +40,10 @@ String stockLogoAssetPath(String symbol) =>
 const _appBrandAsset = 'assets/app_icon/stockfolio_app_icon.png';
 
 IconData trendDirectionIcon(bool positive) =>
-    positive ? Icons.arrow_drop_up_rounded : Icons.arrow_drop_down_rounded;
+    positive ? Icons.trending_up_rounded : Icons.trending_down_rounded;
 
-Color trendDirectionColor(bool positive) => positive ? _gainColor : _lossColor;
+Color trendDirectionColor(bool positive) =>
+    positive ? _gainColor : const Color.fromARGB(230, 244, 18, 18);
 
 class BrandMark extends StatelessWidget {
   const BrandMark({super.key, this.size = 42, this.radius = 10});
@@ -7054,6 +7055,15 @@ class _MarketLeadersSlideshowState extends State<MarketLeadersSlideshow> {
       ),
     ];
     final theme = Theme.of(context);
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final maxStocks = pages.fold<int>(
+      0,
+      (best, page) => max(best, page.stocks.length),
+    );
+    final estimatedRows = screenWidth < 430
+        ? maxStocks
+        : (maxStocks / 2).ceil();
+    final slideHeight = (380 + (estimatedRows * 56)).clamp(460, 660).toDouble();
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -7079,7 +7089,7 @@ class _MarketLeadersSlideshowState extends State<MarketLeadersSlideshow> {
             ),
             const SizedBox(height: 14),
             SizedBox(
-              height: 420,
+              height: slideHeight,
               child: PageView.builder(
                 controller: _pageController,
                 onPageChanged: _onPageChanged,
@@ -7336,20 +7346,18 @@ class _MarketLeaderPanelState extends State<MarketLeaderPanel> {
               ),
             if (stocks.length > 1) ...[
               const SizedBox(height: 14),
-              SizedBox(
-                height: 42,
-                child: ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: stocks.length,
-                  separatorBuilder: (context, index) =>
-                      const SizedBox(width: 8),
-                  itemBuilder: (context, i) => _LeaderTickerChip(
-                    stock: stocks[i],
-                    selected: i == activeIndex,
-                    accent: color,
-                    onTap: () => _selectIndex(i),
-                  ),
-                ),
+              Wrap(
+                spacing: 8,
+                runSpacing: 10,
+                children: [
+                  for (var i = 0; i < stocks.length; i++)
+                    _LeaderTickerChip(
+                      stock: stocks[i],
+                      selected: i == activeIndex,
+                      accent: color,
+                      onTap: () => _selectIndex(i),
+                    ),
+                ],
               ),
             ],
           ],
@@ -7392,28 +7400,30 @@ class _LeaderValueChip extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 4),
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (positive != null) ...[
-                Icon(
-                  trendDirectionIcon(positive!),
-                  size: 18,
-                  color: trendDirectionColor(positive!),
-                ),
-                const SizedBox(width: 2),
-              ],
-              Flexible(
-                child: Text(
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (positive != null) ...[
+                  Icon(
+                    trendDirectionIcon(positive!),
+                    size: 20,
+                    color: trendDirectionColor(positive!),
+                  ),
+                  const SizedBox(width: 6),
+                ],
+                Text(
                   value,
-                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
                   style: theme.textTheme.titleSmall?.copyWith(
                     color: accent,
                     fontWeight: FontWeight.w800,
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ],
       ),
@@ -7466,9 +7476,10 @@ class _LeaderTickerChip extends StatelessWidget {
             const SizedBox(width: 8),
             Icon(
               trendDirectionIcon((stock.percentChange ?? 0) >= 0),
-              size: 18,
+              size: 20,
               color: trendDirectionColor((stock.percentChange ?? 0) >= 0),
             ),
+            const SizedBox(width: 4),
             Text(
               '${stock.percentChange?.toStringAsFixed(2) ?? '0.00'}%',
               style: theme.textTheme.labelMedium?.copyWith(
