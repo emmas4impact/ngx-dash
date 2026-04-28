@@ -37,6 +37,43 @@ String stockLogoUrl(String symbol) =>
 String stockLogoAssetPath(String symbol) =>
     'assets/company_logos/${symbol.trim().toUpperCase()}.png';
 
+const _appBrandAsset = 'assets/app_icon/stockfolio_app_icon.png';
+
+IconData trendDirectionIcon(bool positive) =>
+    positive ? Icons.arrow_drop_up_rounded : Icons.arrow_drop_down_rounded;
+
+Color trendDirectionColor(bool positive) => positive ? _gainColor : _lossColor;
+
+class BrandMark extends StatelessWidget {
+  const BrandMark({super.key, this.size = 42, this.radius = 10});
+
+  final double size;
+  final double radius;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: scheme.primaryContainer.withValues(alpha: 0.85),
+        borderRadius: BorderRadius.circular(radius),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Padding(
+        padding: EdgeInsets.all(size * 0.14),
+        child: Image.asset(
+          _appBrandAsset,
+          fit: BoxFit.contain,
+          errorBuilder: (context, error, stackTrace) =>
+              Icon(Icons.candlestick_chart, color: scheme.primary),
+        ),
+      ),
+    );
+  }
+}
+
 class MarketStatusPalette {
   const MarketStatusPalette({
     required this.base,
@@ -1902,15 +1939,7 @@ class _AuthHeroPanel extends StatelessWidget {
           children: [
             Row(
               children: [
-                Container(
-                  width: 42,
-                  height: 42,
-                  decoration: BoxDecoration(
-                    color: scheme.primaryContainer.withValues(alpha: 0.85),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Icon(Icons.candlestick_chart, color: scheme.primary),
-                ),
+                const BrandMark(),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
@@ -2344,12 +2373,22 @@ class _LandingHeadlineCard extends StatelessWidget {
                       fontSize: 18,
                     ),
                   ),
-                  Text(
-                    '${stock.percentChange?.toStringAsFixed(2) ?? '0.00'}%',
-                    style: TextStyle(
-                      color: accent,
-                      fontWeight: FontWeight.w700,
-                    ),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        trendDirectionIcon(positive),
+                        size: 18,
+                        color: accent,
+                      ),
+                      Text(
+                        '${stock.percentChange?.toStringAsFixed(2) ?? '0.00'}%',
+                        style: TextStyle(
+                          color: accent,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -3530,6 +3569,8 @@ class _DashboardShellState extends State<DashboardShell> {
             ),
             title: Text(
               user == null ? 'Stockfolio' : 'Welcome, ${user.firstName}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
             actions: [
               if (sessionCountdownLabel != null)
@@ -3562,12 +3603,7 @@ class _DashboardShellState extends State<DashboardShell> {
                   ),
                 ),
               ),
-              const SizedBox(width: 6),
-              IconButton(
-                tooltip: 'Sign out',
-                onPressed: widget.onSignOut,
-                icon: const Icon(Icons.logout),
-              ),
+              const SizedBox(width: 10),
             ],
           ),
           body: snapshot.connectionState == ConnectionState.waiting
@@ -7032,29 +7068,11 @@ class _MarketLeadersSlideshowState extends State<MarketLeadersSlideshow> {
                     fontWeight: FontWeight.w700,
                   ),
                 ),
-                const Spacer(),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.primaryContainer,
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                  child: Text(
-                    'Slide 5s',
-                    style: theme.textTheme.labelMedium?.copyWith(
-                      color: theme.colorScheme.primary,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
               ],
             ),
             const SizedBox(height: 8),
             Text(
-              'Top gainers and top losers swap position like a live market slideshow.',
+              'Tap any stock card to open details.',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),
@@ -7306,6 +7324,7 @@ class _MarketLeaderPanelState extends State<MarketLeaderPanel> {
                                 value:
                                     '${activeStock.percentChange?.toStringAsFixed(2) ?? '0.00'}%',
                                 accent: color,
+                                positive: (activeStock.percentChange ?? 0) >= 0,
                               ),
                             ),
                           ],
@@ -7345,11 +7364,13 @@ class _LeaderValueChip extends StatelessWidget {
     required this.label,
     required this.value,
     required this.accent,
+    this.positive,
   });
 
   final String label;
   final String value;
   final Color accent;
+  final bool? positive;
 
   @override
   Widget build(BuildContext context) {
@@ -7371,12 +7392,28 @@ class _LeaderValueChip extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 4),
-          Text(
-            value,
-            style: theme.textTheme.titleSmall?.copyWith(
-              color: accent,
-              fontWeight: FontWeight.w800,
-            ),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (positive != null) ...[
+                Icon(
+                  trendDirectionIcon(positive!),
+                  size: 18,
+                  color: trendDirectionColor(positive!),
+                ),
+                const SizedBox(width: 2),
+              ],
+              Flexible(
+                child: Text(
+                  value,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    color: accent,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -7427,6 +7464,11 @@ class _LeaderTickerChip extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
+            Icon(
+              trendDirectionIcon((stock.percentChange ?? 0) >= 0),
+              size: 18,
+              color: trendDirectionColor((stock.percentChange ?? 0) >= 0),
+            ),
             Text(
               '${stock.percentChange?.toStringAsFixed(2) ?? '0.00'}%',
               style: theme.textTheme.labelMedium?.copyWith(
