@@ -16,7 +16,7 @@ void main() {
     await tester.pumpWidget(const NgxPortfolioApp());
     await tester.pump(const Duration(milliseconds: 100));
 
-    expect(find.text('Stockfolio'), findsOneWidget);
+    expect(find.text('Stockfolio NG'), findsOneWidget);
     expect(find.text('Sign in'), findsOneWidget);
   });
 }

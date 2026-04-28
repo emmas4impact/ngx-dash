@@ -23,17 +23,57 @@ const _themeModePreferenceKey = 'theme_mode';
 const _webSessionDeadlineKey = 'web_session_deadline_ms';
 const _webSessionExtendedKey = 'web_session_extended';
 const _financialPrivacyPreferenceKey = 'financial_privacy_hidden';
-const _seedColor = Color(0xFF0E7C66);
+const _seedColor = Color(0xFF00A86B);
+const _gainColor = Color(0xFF00B67A);
+const _lossColor = Color(0xFFFF5A7A);
 const _darkScaffold = Color(0xFF0B1215);
 const _darkSurface = Color(0xFF101A1E);
 const _darkSurfaceAlt = Color(0xFF142126);
-const _lightScaffold = Color(0xFFF4F7F8);
+const _lightScaffold = Color(0xFFEDF2F7);
 
 String stockLogoUrl(String symbol) =>
     '$apiBaseUrl/public/stocks/${Uri.encodeComponent(symbol)}/logo';
 
 String stockLogoAssetPath(String symbol) =>
     'assets/company_logos/${symbol.trim().toUpperCase()}.png';
+
+const _appBrandAsset = 'assets/app_icon/stockfolio_app_icon.png';
+
+IconData trendDirectionIcon(bool positive) =>
+    positive ? Icons.trending_up_rounded : Icons.trending_down_rounded;
+
+Color trendDirectionColor(bool positive) =>
+    positive ? _gainColor : const Color.fromARGB(230, 244, 18, 18);
+
+class BrandMark extends StatelessWidget {
+  const BrandMark({super.key, this.size = 42, this.radius = 10});
+
+  final double size;
+  final double radius;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: scheme.primaryContainer.withValues(alpha: 0.85),
+        borderRadius: BorderRadius.circular(radius),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Padding(
+        padding: EdgeInsets.all(size * 0.14),
+        child: Image.asset(
+          _appBrandAsset,
+          fit: BoxFit.contain,
+          errorBuilder: (context, error, stackTrace) =>
+              Icon(Icons.candlestick_chart, color: scheme.primary),
+        ),
+      ),
+    );
+  }
+}
 
 class MarketStatusPalette {
   const MarketStatusPalette({
@@ -377,75 +417,6 @@ class _NgxPortfolioAppState extends State<NgxPortfolioApp> {
           elevation: 0,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.all(Radius.circular(24)),
-            side: BorderSide(color: Color(0xFF203138)),
-          ),
-        ),
-      ),
-      darkTheme: ThemeData(
-        useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: _seedColor,
-          brightness: Brightness.dark,
-        ),
-        scaffoldBackgroundColor: _darkScaffold,
-        canvasColor: _darkScaffold,
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Color(0xFF121C20),
-          foregroundColor: Color(0xFFE6F4EF),
-          elevation: 0,
-        ),
-        navigationBarTheme: NavigationBarThemeData(
-          backgroundColor: const Color(0xFF111B1F),
-          indicatorColor: const Color(0xFF173D35),
-          labelTextStyle: WidgetStateProperty.resolveWith((states) {
-            final selected = states.contains(WidgetState.selected);
-            return TextStyle(
-              color: selected
-                  ? const Color(0xFF8CE2C3)
-                  : const Color(0xFF92AAA4),
-              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-            );
-          }),
-        ),
-        navigationRailTheme: const NavigationRailThemeData(
-          backgroundColor: Color(0xFF10181C),
-          indicatorColor: Color(0xFF173D35),
-          selectedIconTheme: IconThemeData(color: Color(0xFF8CE2C3)),
-          unselectedIconTheme: IconThemeData(color: Color(0xFF9DB1AB)),
-          selectedLabelTextStyle: TextStyle(
-            color: Color(0xFF8CE2C3),
-            fontWeight: FontWeight.w700,
-          ),
-          unselectedLabelTextStyle: TextStyle(color: Color(0xFF9DB1AB)),
-        ),
-        inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          fillColor: _darkSurfaceAlt,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(18),
-            borderSide: BorderSide.none,
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(18),
-            borderSide: const BorderSide(color: Color(0xFF26363C)),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(18),
-            borderSide: const BorderSide(color: Color(0xFF58C1A0), width: 1.5),
-          ),
-          errorBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(18),
-            borderSide: const BorderSide(color: Color(0xFFF87171)),
-          ),
-          focusedErrorBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(18),
-            borderSide: const BorderSide(color: Color(0xFFF87171), width: 1.5),
-          ),
-        ),
-        cardTheme: const CardThemeData(
-          elevation: 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.all(Radius.circular(8)),
             side: BorderSide(color: Color(0xFF203138)),
           ),
         ),
@@ -3994,8 +3965,6 @@ class _HomeScreenState extends State<HomeScreen> {
   late Future<MarketLeaders> leadersFuture = widget.api.marketLeaders();
   late Future<MarketIdeasBundle> ideasFuture = widget.api.marketIdeas();
   Timer? refreshTimer;
-  Timer? searchDebounce;
-  String? searchHint;
 
   @override
   void initState() {
@@ -4047,21 +4016,6 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       ),
     );
-  }
-
-  void onSearchChanged(String value) {
-    searchDebounce?.cancel();
-    final trimmed = value.trim();
-    if (trimmed.isNotEmpty && trimmed.length < 3) {
-      setState(() {
-        searchHint = 'Enter at least 3 characters to see suggestions.';
-      });
-      return;
-    }
-    setState(() {
-      searchHint = null;
-    });
-    searchDebounce = Timer(const Duration(milliseconds: 250), refresh);
   }
 
   @override
@@ -7127,6 +7081,15 @@ class _MarketLeadersSlideshowState extends State<MarketLeadersSlideshow> {
       ),
     ];
     final theme = Theme.of(context);
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final maxStocks = pages.fold<int>(
+      0,
+      (best, page) => max(best, page.stocks.length),
+    );
+    final estimatedRows = screenWidth < 430
+        ? maxStocks
+        : (maxStocks / 2).ceil();
+    final slideHeight = (380 + (estimatedRows * 56)).clamp(460, 660).toDouble();
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -7152,7 +7115,7 @@ class _MarketLeadersSlideshowState extends State<MarketLeadersSlideshow> {
             ),
             const SizedBox(height: 14),
             SizedBox(
-              height: 420,
+              height: slideHeight,
               child: PageView.builder(
                 controller: _pageController,
                 onPageChanged: _onPageChanged,
@@ -7409,20 +7372,18 @@ class _MarketLeaderPanelState extends State<MarketLeaderPanel> {
               ),
             if (stocks.length > 1) ...[
               const SizedBox(height: 14),
-              SizedBox(
-                height: 42,
-                child: ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: stocks.length,
-                  separatorBuilder: (context, index) =>
-                      const SizedBox(width: 8),
-                  itemBuilder: (context, i) => _LeaderTickerChip(
-                    stock: stocks[i],
-                    selected: i == activeIndex,
-                    accent: color,
-                    onTap: () => _selectIndex(i),
-                  ),
-                ),
+              Wrap(
+                spacing: 8,
+                runSpacing: 10,
+                children: [
+                  for (var i = 0; i < stocks.length; i++)
+                    _LeaderTickerChip(
+                      stock: stocks[i],
+                      selected: i == activeIndex,
+                      accent: color,
+                      onTap: () => _selectIndex(i),
+                    ),
+                ],
               ),
             ],
           ],
@@ -7465,28 +7426,30 @@ class _LeaderValueChip extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 4),
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (positive != null) ...[
-                Icon(
-                  trendDirectionIcon(positive!),
-                  size: 18,
-                  color: trendDirectionColor(positive!),
-                ),
-                const SizedBox(width: 2),
-              ],
-              Flexible(
-                child: Text(
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (positive != null) ...[
+                  Icon(
+                    trendDirectionIcon(positive!),
+                    size: 20,
+                    color: trendDirectionColor(positive!),
+                  ),
+                  const SizedBox(width: 6),
+                ],
+                Text(
                   value,
-                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
                   style: theme.textTheme.titleSmall?.copyWith(
                     color: accent,
                     fontWeight: FontWeight.w800,
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ],
       ),
@@ -7539,9 +7502,10 @@ class _LeaderTickerChip extends StatelessWidget {
             const SizedBox(width: 8),
             Icon(
               trendDirectionIcon((stock.percentChange ?? 0) >= 0),
-              size: 18,
+              size: 20,
               color: trendDirectionColor((stock.percentChange ?? 0) >= 0),
             ),
+            const SizedBox(width: 4),
             Text(
               '${stock.percentChange?.toStringAsFixed(2) ?? '0.00'}%',
               style: theme.textTheme.labelMedium?.copyWith(
