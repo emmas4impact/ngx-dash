@@ -23,56 +23,17 @@ const _themeModePreferenceKey = 'theme_mode';
 const _webSessionDeadlineKey = 'web_session_deadline_ms';
 const _webSessionExtendedKey = 'web_session_extended';
 const _financialPrivacyPreferenceKey = 'financial_privacy_hidden';
-const _seedColor = Color(0xFF00A86B);
-const _gainColor = Color(0xFF00B67A);
-const _lossColor = Color(0xFFFF5A7A);
+const _seedColor = Color(0xFF0E7C66);
 const _darkScaffold = Color(0xFF0B1215);
 const _darkSurface = Color(0xFF101A1E);
 const _darkSurfaceAlt = Color(0xFF142126);
-const _lightScaffold = Color(0xFFEDF2F7);
+const _lightScaffold = Color(0xFFF4F7F8);
 
 String stockLogoUrl(String symbol) =>
     '$apiBaseUrl/public/stocks/${Uri.encodeComponent(symbol)}/logo';
 
 String stockLogoAssetPath(String symbol) =>
     'assets/company_logos/${symbol.trim().toUpperCase()}.png';
-
-const _appBrandAsset = 'assets/app_icon/stockfolio_app_icon.png';
-
-IconData trendDirectionIcon(bool positive) =>
-    positive ? Icons.arrow_drop_up_rounded : Icons.arrow_drop_down_rounded;
-
-Color trendDirectionColor(bool positive) => positive ? _gainColor : _lossColor;
-
-class BrandMark extends StatelessWidget {
-  const BrandMark({super.key, this.size = 42, this.radius = 10});
-
-  final double size;
-  final double radius;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        color: scheme.primaryContainer.withValues(alpha: 0.85),
-        borderRadius: BorderRadius.circular(radius),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Padding(
-        padding: EdgeInsets.all(size * 0.14),
-        child: Image.asset(
-          _appBrandAsset,
-          fit: BoxFit.contain,
-          errorBuilder: (context, error, stackTrace) =>
-              Icon(Icons.candlestick_chart, color: scheme.primary),
-        ),
-      ),
-    );
-  }
-}
 
 class MarketStatusPalette {
   const MarketStatusPalette({
@@ -416,6 +377,75 @@ class _NgxPortfolioAppState extends State<NgxPortfolioApp> {
           elevation: 0,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.all(Radius.circular(24)),
+            side: BorderSide(color: Color(0xFF203138)),
+          ),
+        ),
+      ),
+      darkTheme: ThemeData(
+        useMaterial3: true,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: _seedColor,
+          brightness: Brightness.dark,
+        ),
+        scaffoldBackgroundColor: _darkScaffold,
+        canvasColor: _darkScaffold,
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Color(0xFF121C20),
+          foregroundColor: Color(0xFFE6F4EF),
+          elevation: 0,
+        ),
+        navigationBarTheme: NavigationBarThemeData(
+          backgroundColor: const Color(0xFF111B1F),
+          indicatorColor: const Color(0xFF173D35),
+          labelTextStyle: WidgetStateProperty.resolveWith((states) {
+            final selected = states.contains(WidgetState.selected);
+            return TextStyle(
+              color: selected
+                  ? const Color(0xFF8CE2C3)
+                  : const Color(0xFF92AAA4),
+              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+            );
+          }),
+        ),
+        navigationRailTheme: const NavigationRailThemeData(
+          backgroundColor: Color(0xFF10181C),
+          indicatorColor: Color(0xFF173D35),
+          selectedIconTheme: IconThemeData(color: Color(0xFF8CE2C3)),
+          unselectedIconTheme: IconThemeData(color: Color(0xFF9DB1AB)),
+          selectedLabelTextStyle: TextStyle(
+            color: Color(0xFF8CE2C3),
+            fontWeight: FontWeight.w700,
+          ),
+          unselectedLabelTextStyle: TextStyle(color: Color(0xFF9DB1AB)),
+        ),
+        inputDecorationTheme: InputDecorationTheme(
+          filled: true,
+          fillColor: _darkSurfaceAlt,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(18),
+            borderSide: BorderSide.none,
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(18),
+            borderSide: const BorderSide(color: Color(0xFF26363C)),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(18),
+            borderSide: const BorderSide(color: Color(0xFF58C1A0), width: 1.5),
+          ),
+          errorBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(18),
+            borderSide: const BorderSide(color: Color(0xFFF87171)),
+          ),
+          focusedErrorBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(18),
+            borderSide: const BorderSide(color: Color(0xFFF87171), width: 1.5),
+          ),
+        ),
+        cardTheme: const CardThemeData(
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.all(Radius.circular(8)),
             side: BorderSide(color: Color(0xFF203138)),
           ),
         ),
@@ -3964,6 +3994,8 @@ class _HomeScreenState extends State<HomeScreen> {
   late Future<MarketLeaders> leadersFuture = widget.api.marketLeaders();
   late Future<MarketIdeasBundle> ideasFuture = widget.api.marketIdeas();
   Timer? refreshTimer;
+  Timer? searchDebounce;
+  String? searchHint;
 
   @override
   void initState() {
@@ -4015,6 +4047,21 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       ),
     );
+  }
+
+  void onSearchChanged(String value) {
+    searchDebounce?.cancel();
+    final trimmed = value.trim();
+    if (trimmed.isNotEmpty && trimmed.length < 3) {
+      setState(() {
+        searchHint = 'Enter at least 3 characters to see suggestions.';
+      });
+      return;
+    }
+    setState(() {
+      searchHint = null;
+    });
+    searchDebounce = Timer(const Duration(milliseconds: 250), refresh);
   }
 
   @override
@@ -4472,6 +4519,32 @@ class _AccountScreenState extends State<AccountScreen> {
       if (mounted) showError(context, error.toString());
     } finally {
       if (mounted) setState(() => deletingAccount = false);
+    }
+  }
+
+  Future<void> backfillHistory() async {
+    setState(() => backfillingHistory = true);
+    try {
+      final message = await widget.api.syncStocks(includeHistory: true);
+      refresh();
+      if (mounted) showMessage(context, message);
+    } catch (error) {
+      if (mounted) showError(context, error.toString());
+    } finally {
+      if (mounted) setState(() => backfillingHistory = false);
+    }
+  }
+
+  Future<void> sendTestPush() async {
+    setState(() => sendingTestPush = true);
+    try {
+      final message = await widget.api.sendTestPush();
+      refresh();
+      if (mounted) showMessage(context, message);
+    } catch (error) {
+      if (mounted) showError(context, error.toString());
+    } finally {
+      if (mounted) setState(() => sendingTestPush = false);
     }
   }
 

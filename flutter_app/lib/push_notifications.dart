@@ -64,10 +64,8 @@ class PushNotifications {
   static final PushNotifications instance = PushNotifications._();
 
   final _messages = StreamController<PushAlertMessage>.broadcast();
-  final _openedMessages = StreamController<PushAlertMessage>.broadcast();
   StreamSubscription<String>? _refreshSubscription;
   StreamSubscription<RemoteMessage>? _foregroundSubscription;
-  StreamSubscription<RemoteMessage>? _openedSubscription;
   PushRegistrationResult _lastResult = const PushRegistrationResult(
     enabled: false,
     available: false,
@@ -75,17 +73,9 @@ class PushNotifications {
   );
   String? _currentToken;
   bool _initialized = false;
-  PushAlertMessage? _pendingOpenedMessage;
 
   Stream<PushAlertMessage> get messages => _messages.stream;
-  Stream<PushAlertMessage> get openedMessages => _openedMessages.stream;
   PushRegistrationResult get lastResult => _lastResult;
-
-  PushAlertMessage? consumePendingOpenedMessage() {
-    final message = _pendingOpenedMessage;
-    _pendingOpenedMessage = null;
-    return message;
-  }
 
   Future<PushRegistrationResult> ensureRegistered({
     required PushTokenRegistrar registerToken,
@@ -132,17 +122,6 @@ class PushNotifications {
       FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
 
       final messaging = FirebaseMessaging.instance;
-      _openedSubscription ??= FirebaseMessaging.onMessageOpenedApp.listen((
-        message,
-      ) {
-        _openedMessages.add(_messageFromRemoteMessage(message));
-      });
-
-      final initialMessage = await messaging.getInitialMessage();
-      if (initialMessage != null) {
-        _pendingOpenedMessage = _messageFromRemoteMessage(initialMessage);
-      }
-
       final permission = await messaging.requestPermission(
         alert: true,
         badge: true,
@@ -189,7 +168,22 @@ class PushNotifications {
         } catch (_) {}
       });
       _foregroundSubscription ??= FirebaseMessaging.onMessage.listen((message) {
-        _messages.add(_messageFromRemoteMessage(message));
+        final title =
+            message.notification?.title ??
+            message.data['title']?.toString() ??
+            'Stockfolio NG alert';
+        final body =
+            message.notification?.body ??
+            message.data['body']?.toString() ??
+            'A market alert just came in.';
+        _messages.add(
+          PushAlertMessage(
+            title: title,
+            body: body,
+            route: message.data['route']?.toString(),
+            symbol: message.data['symbol']?.toString(),
+          ),
+        );
       });
 
       _lastResult = const PushRegistrationResult(
@@ -224,28 +218,9 @@ class PushNotifications {
   Future<void> dispose() async {
     await _refreshSubscription?.cancel();
     await _foregroundSubscription?.cancel();
-    await _openedSubscription?.cancel();
     _refreshSubscription = null;
     _foregroundSubscription = null;
-    _openedSubscription = null;
   }
-}
-
-PushAlertMessage _messageFromRemoteMessage(RemoteMessage message) {
-  final title =
-      message.notification?.title ??
-      message.data['title']?.toString() ??
-      'Stockfolio NG alert';
-  final body =
-      message.notification?.body ??
-      message.data['body']?.toString() ??
-      'A market alert just came in.';
-  return PushAlertMessage(
-    title: title,
-    body: body,
-    route: message.data['route']?.toString(),
-    symbol: message.data['symbol']?.toString(),
-  );
 }
 
 FirebaseOptions? _firebaseOptionsForCurrentPlatform() {
