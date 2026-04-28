@@ -3095,6 +3095,7 @@ class _DashboardShellState extends State<DashboardShell> {
   Timer? alertTimer;
   Timer? webSessionTimer;
   StreamSubscription<PushAlertMessage>? pushMessageSubscription;
+  StreamSubscription<PushAlertMessage>? pushOpenSubscription;
   final Map<String, double> _lastSeenHoldingPrices = {};
   final Map<String, double> _lastAlertPrices = {};
   DateTime? webSessionDeadline;
@@ -3121,6 +3122,10 @@ class _DashboardShellState extends State<DashboardShell> {
     pushMessageSubscription = PushNotifications.instance.messages.listen(
       _showPushMessage,
     );
+    pushOpenSubscription = PushNotifications.instance.openedMessages.listen(
+      _handlePushOpen,
+    );
+    Future<void>.delayed(Duration.zero, _handleInitialPushOpen);
   }
 
   @override
@@ -3128,6 +3133,7 @@ class _DashboardShellState extends State<DashboardShell> {
     alertTimer?.cancel();
     webSessionTimer?.cancel();
     pushMessageSubscription?.cancel();
+    pushOpenSubscription?.cancel();
     super.dispose();
   }
 
@@ -3328,11 +3334,39 @@ class _DashboardShellState extends State<DashboardShell> {
         SnackBar(
           content: Text('${message.title}. ${message.body}'),
           action: SnackBarAction(
-            label: 'Portfolio',
-            onPressed: () => setState(() => index = 1),
+            label: 'Open',
+            onPressed: () => _openPushDestination(message),
           ),
         ),
       );
+  }
+
+  Future<void> _handleInitialPushOpen() async {
+    await pushSetupFuture;
+    if (!mounted) return;
+    final message = PushNotifications.instance.consumePendingOpenedMessage();
+    if (message != null) {
+      _handlePushOpen(message);
+    }
+  }
+
+  void _handlePushOpen(PushAlertMessage message) {
+    if (!mounted) return;
+    _openPushDestination(message);
+  }
+
+  void _openPushDestination(PushAlertMessage message) {
+    if (!mounted) return;
+    final route = (message.route ?? '').trim().toLowerCase();
+    var nextIndex = switch (route) {
+      'home' => 0,
+      'portfolio' => 1,
+      'stocks' || 'stock' => 2,
+      'charts' || 'chart' => 3,
+      'profile' || 'account' => 4,
+      _ => message.symbol?.trim().isNotEmpty == true ? 2 : 1,
+    };
+    setState(() => index = nextIndex);
   }
 
   @override
@@ -3531,9 +3565,7 @@ class VersionLabel extends StatelessWidget {
         builder: (context, snapshot) {
           final info = snapshot.data;
           final packageVersion =
-              info == null ||
-                  info.version.isEmpty ||
-                  info.buildNumber.isEmpty
+              info == null || info.version.isEmpty || info.buildNumber.isEmpty
               ? null
               : '${info.version}.${info.buildNumber}';
           final version = packageVersion ?? appDisplayVersion;
@@ -4549,7 +4581,9 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
                     label: widget.hideFinancialValues
                         ? 'Reveal totals'
                         : 'Hide totals',
-                    value: widget.hideFinancialValues ? 'Tap to show' : 'Tap to hide',
+                    value: widget.hideFinancialValues
+                        ? 'Tap to show'
+                        : 'Tap to hide',
                     icon: widget.hideFinancialValues
                         ? Icons.visibility_outlined
                         : Icons.visibility_off_outlined,
@@ -5177,7 +5211,8 @@ class _StocksScreenState extends State<StocksScreen> {
                   decoration: InputDecoration(
                     prefixIcon: const Icon(Icons.search),
                     labelText: 'Search stocks',
-                    helperText: searchHint ?? 'Suggestions start after 3 characters.',
+                    helperText:
+                        searchHint ?? 'Suggestions start after 3 characters.',
                   ),
                 ),
               ),
@@ -5300,6 +5335,9 @@ class _ChartsScreenState extends State<ChartsScreen> {
     }
   }
 
+  String get _historySelectionKey =>
+      '${selectedSymbol ?? 'none'}-$selectedRangeMonths';
+
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<List<Stock>>(
@@ -5369,6 +5407,7 @@ class _ChartsScreenState extends State<ChartsScreen> {
             SizedBox(
               height: 360,
               child: Card(
+                key: ValueKey(_historySelectionKey),
                 child: Padding(
                   padding: const EdgeInsets.all(16),
                   child: historyFuture == null
@@ -5393,7 +5432,13 @@ class _ChartsScreenState extends State<ChartsScreen> {
                                     'No history available for the selected ${rangeLabel(selectedRangeMonths)} range yet.',
                               );
                             }
-                            return PriceChart(points: points);
+                            return PriceChart(
+                              key: ValueKey(
+                                '$_historySelectionKey-${points.length}-${points.first.date.toIso8601String()}-${points.last.date.toIso8601String()}',
+                              ),
+                              points: points,
+                              rangeLabel: rangeLabel(selectedRangeMonths),
+                            );
                           },
                         ),
                 ),
@@ -6680,23 +6725,30 @@ class MarketIdeasPanel extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(
-                  Icons.insights_outlined,
-                  color: theme.colorScheme.primary,
-                ),
+                Icon(Icons.insights_outlined, color: theme.colorScheme.primary),
                 const SizedBox(width: 10),
-                Text(
-                  'Potential buy setups',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const Spacer(),
-                Text(
-                  'Analyzing ${bundle.stocksAnalyzed} NGX stocks',
-                  style: theme.textTheme.labelMedium?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Potential buy setups',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Analyzing ${bundle.stocksAnalyzed} NGX stocks',
+                        style: theme.textTheme.labelMedium?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
@@ -6715,11 +6767,11 @@ class MarketIdeasPanel extends StatelessWidget {
                 child: Container(
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
-                    color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.28),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                      color: theme.colorScheme.outlineVariant,
+                    color: theme.colorScheme.surfaceContainerHighest.withValues(
+                      alpha: 0.28,
                     ),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: theme.colorScheme.outlineVariant),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -6792,7 +6844,8 @@ class MarketIdeasPanel extends StatelessWidget {
                             )
                             .toList(),
                       ),
-                      if (idea.webSummary != null && idea.webSummary!.isNotEmpty) ...[
+                      if (idea.webSummary != null &&
+                          idea.webSummary!.isNotEmpty) ...[
                         const SizedBox(height: 10),
                         Text(
                           'Latest company update',
@@ -6989,9 +7042,10 @@ class StockTile extends StatelessWidget {
 }
 
 class PriceChart extends StatelessWidget {
-  const PriceChart({super.key, required this.points});
+  const PriceChart({super.key, required this.points, this.rangeLabel});
 
   final List<PricePoint> points;
+  final String? rangeLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -7006,9 +7060,34 @@ class PriceChart extends StatelessWidget {
     final primary = Theme.of(context).colorScheme.primary;
     final secondary = Theme.of(context).colorScheme.tertiary;
     final latest = points.last;
+    final earliest = points.first;
+    final dateRangeLabel =
+        '${DateFormat.MMMd().format(earliest.date)} - ${DateFormat.MMMd().format(latest.date)}';
 
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        Wrap(
+          spacing: 10,
+          runSpacing: 6,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            if (rangeLabel != null)
+              Text(
+                '$rangeLabel view',
+                style: theme.textTheme.labelLarge?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            Text(
+              dateRangeLabel,
+              style: theme.textTheme.labelMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
         Wrap(
           alignment: WrapAlignment.end,
           spacing: 14,
