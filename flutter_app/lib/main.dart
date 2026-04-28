@@ -29,7 +29,7 @@ const _lossColor = Color(0xFFFF5A7A);
 const _darkScaffold = Color(0xFF0B1215);
 const _darkSurface = Color(0xFF101A1E);
 const _darkSurfaceAlt = Color(0xFF142126);
-const _lightScaffold = Color(0xFFF3F7FC);
+const _lightScaffold = Color(0xFFEDF2F7);
 
 String stockLogoUrl(String symbol) =>
     '$apiBaseUrl/public/stocks/${Uri.encodeComponent(symbol)}/logo';
@@ -216,11 +216,11 @@ class _NgxPortfolioAppState extends State<NgxPortfolioApp> {
           seedColor: _seedColor,
           brightness: Brightness.light,
         ).copyWith(
-          primary: const Color(0xFF009F6B),
-          secondary: const Color(0xFF00C389),
-          tertiary: const Color(0xFF1976FF),
+          primary: const Color(0xFF007A68),
+          secondary: const Color(0xFF00A86B),
+          tertiary: const Color(0xFF145BFF),
           surface: Colors.white,
-          surfaceContainerHighest: const Color(0xFFEAF7F2),
+          surfaceContainerHighest: const Color(0xFFE6F0ED),
         );
     final darkScheme =
         ColorScheme.fromSeed(
@@ -243,37 +243,37 @@ class _NgxPortfolioAppState extends State<NgxPortfolioApp> {
         colorScheme: lightScheme,
         scaffoldBackgroundColor: _lightScaffold,
         appBarTheme: const AppBarTheme(
-          backgroundColor: Color(0xFFF5FBFF),
+          backgroundColor: Color(0xFFE5F0EE),
           foregroundColor: Color(0xFF10231D),
           elevation: 0,
         ),
         navigationBarTheme: NavigationBarThemeData(
-          backgroundColor: const Color(0xFFF9FCFF),
-          indicatorColor: const Color(0xFFD7FFF0),
+          backgroundColor: const Color(0xFFF8FBFC),
+          indicatorColor: const Color(0xFFD3F3E5),
           iconTheme: WidgetStateProperty.resolveWith((states) {
             final selected = states.contains(WidgetState.selected);
             return IconThemeData(
               color: selected
-                  ? const Color(0xFF009F6B)
-                  : const Color(0xFF4E6960),
+                  ? const Color(0xFF007A68)
+                  : const Color(0xFF445B57),
             );
           }),
           labelTextStyle: WidgetStateProperty.resolveWith((states) {
             final selected = states.contains(WidgetState.selected);
             return TextStyle(
               color: selected
-                  ? const Color(0xFF009F6B)
-                  : const Color(0xFF4E6960),
+                  ? const Color(0xFF007A68)
+                  : const Color(0xFF445B57),
               fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
             );
           }),
         ),
         navigationRailTheme: const NavigationRailThemeData(
-          backgroundColor: Color(0xFFF1FAF6),
-          indicatorColor: Color(0xFFD7FFF0),
-          selectedIconTheme: IconThemeData(color: Color(0xFF009F6B)),
+          backgroundColor: Color(0xFFEAF4F1),
+          indicatorColor: Color(0xFFD3F3E5),
+          selectedIconTheme: IconThemeData(color: Color(0xFF007A68)),
           selectedLabelTextStyle: TextStyle(
-            color: Color(0xFF009F6B),
+            color: Color(0xFF007A68),
             fontWeight: FontWeight.w700,
           ),
         ),
@@ -2219,7 +2219,7 @@ class _LandingMarketView extends StatelessWidget {
           runSpacing: 12,
           children: [
             _LandingMetricTile(
-              label: 'Top movers tracked',
+              label: 'Top gainers tracked',
               value: movers.length.toString(),
               icon: Icons.local_fire_department_outlined,
               tone: const Color(0xFFDB5C19),
@@ -2253,24 +2253,10 @@ class _LandingMarketView extends StatelessWidget {
               ),
               child: _LandingPulseChart(stocks: chartStocks),
             );
-            final sidePanel = Column(
-              children: [
-                MarketLeaderPanel(
-                  title: 'Top movers',
-                  icon: Icons.local_fire_department_outlined,
-                  stocks: movers,
-                  positive: true,
-                  onStockTap: onOpenStock,
-                ),
-                const SizedBox(height: 12),
-                MarketLeaderPanel(
-                  title: 'Top losers',
-                  icon: Icons.trending_down_outlined,
-                  stocks: losers,
-                  positive: false,
-                  onStockTap: onOpenStock,
-                ),
-              ],
+            final sidePanel = MarketLeadersSlideshow(
+              movers: movers,
+              losers: losers,
+              onStockTap: onOpenStock,
             );
 
             if (constraints.maxWidth >= 980) {
@@ -3126,6 +3112,7 @@ class DashboardShell extends StatefulWidget {
 }
 
 class _DashboardShellState extends State<DashboardShell> {
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   int index = 0;
   late Future<AppUser> userFuture = widget.api.me();
   late final Future<PackageInfo> packageInfoFuture = PackageInfo.fromPlatform();
@@ -3504,10 +3491,22 @@ class _DashboardShellState extends State<DashboardShell> {
             ),
         ];
 
+        final headerForeground = theme.brightness == Brightness.dark
+            ? Colors.white
+            : const Color(0xFF10342E);
         return Scaffold(
+          key: _scaffoldKey,
+          drawer: DashboardSideDrawer(
+            user: user,
+            packageInfoFuture: packageInfoFuture,
+            themeMode: widget.themeMode,
+            onThemeSelected: widget.onThemeModeChanged,
+            onOpenProfile: () => setState(() => index = 4),
+            onSignOut: widget.onSignOut,
+          ),
           appBar: AppBar(
             backgroundColor: Colors.transparent,
-            foregroundColor: Colors.white,
+            foregroundColor: headerForeground,
             elevation: 0,
             flexibleSpace: DecoratedBox(
               decoration: BoxDecoration(
@@ -3518,11 +3517,16 @@ class _DashboardShellState extends State<DashboardShell> {
                         end: Alignment.bottomRight,
                       )
                     : const LinearGradient(
-                        colors: [Color(0xFF008F68), Color(0xFF19C68D)],
+                        colors: [Color(0xFFD6E9E4), Color(0xFFE3F0ED)],
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
                       ),
               ),
+            ),
+            leading: IconButton(
+              tooltip: 'Menu',
+              onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+              icon: const Icon(Icons.menu_rounded),
             ),
             title: Text(
               user == null ? 'Stockfolio' : 'Welcome, ${user.firstName}',
@@ -3536,21 +3540,29 @@ class _DashboardShellState extends State<DashboardShell> {
                     avatar: Icon(
                       Icons.timer_outlined,
                       size: 18,
-                      color: Colors.white,
+                      color: headerForeground,
                     ),
-                    backgroundColor: Colors.white.withValues(alpha: 0.12),
+                    backgroundColor: headerForeground.withValues(alpha: 0.08),
                     side: BorderSide(
-                      color: Colors.white.withValues(alpha: 0.18),
+                      color: headerForeground.withValues(alpha: 0.16),
                     ),
-                    labelStyle: const TextStyle(color: Colors.white),
+                    labelStyle: TextStyle(color: headerForeground),
                   ),
                 ),
               const SizedBox(width: 8),
-              if (!isCompactLayout)
-                ThemeModeButton(
-                  themeMode: widget.themeMode,
-                  onSelected: widget.onThemeModeChanged,
+              InkWell(
+                onTap: () => setState(() => index = 4),
+                borderRadius: BorderRadius.circular(999),
+                child: Padding(
+                  padding: const EdgeInsets.all(4),
+                  child: ProfileAvatar(
+                    imageUrl: user?.profileImageUrl,
+                    fallbackText: user?.firstName ?? 'S',
+                    radius: 21,
+                  ),
                 ),
+              ),
+              const SizedBox(width: 6),
               IconButton(
                 tooltip: 'Sign out',
                 onPressed: widget.onSignOut,
@@ -3584,20 +3596,12 @@ class _DashboardShellState extends State<DashboardShell> {
             mainAxisSize: MainAxisSize.min,
             children: [
               if (isCompactLayout)
-                BottomNavUtilityBar(
-                  packageInfoFuture: packageInfoFuture,
-                  themeMode: widget.themeMode,
-                  onThemeSelected: widget.onThemeModeChanged,
-                ),
-              if (isCompactLayout)
                 NavigationBar(
                   selectedIndex: index,
                   onDestinationSelected: (value) =>
                       setState(() => index = value),
                   destinations: destinations,
                 ),
-              if (!isCompactLayout)
-                VersionLabel(packageInfoFuture: packageInfoFuture),
             ],
           ),
         );
@@ -3695,48 +3699,205 @@ class VersionLabel extends StatelessWidget {
   }
 }
 
-class BottomNavUtilityBar extends StatelessWidget {
-  const BottomNavUtilityBar({
+class DashboardSideDrawer extends StatelessWidget {
+  const DashboardSideDrawer({
     super.key,
+    required this.user,
     required this.packageInfoFuture,
     required this.themeMode,
     required this.onThemeSelected,
+    required this.onOpenProfile,
+    required this.onSignOut,
   });
 
+  final AppUser? user;
   final Future<PackageInfo> packageInfoFuture;
   final ThemeMode themeMode;
   final ValueChanged<ThemeMode> onThemeSelected;
+  final VoidCallback onOpenProfile;
+  final Future<void> Function() onSignOut;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return SafeArea(
-      top: false,
-      bottom: false,
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(14, 10, 14, 8),
+    final resolvedUser = user;
+    return Drawer(
+      child: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(18, 18, 18, 24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  ProfileAvatar(
+                    imageUrl: resolvedUser?.profileImageUrl,
+                    fallbackText: resolvedUser?.firstName ?? 'S',
+                    radius: 24,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          resolvedUser?.displayName ?? 'Stockfolio NG',
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        if (resolvedUser != null)
+                          Text(
+                            resolvedUser.email,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 22),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Appearance',
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 10,
+                        children: [
+                          _DrawerThemeChip(
+                            label: 'System',
+                            icon: Icons.brightness_auto_outlined,
+                            selected: themeMode == ThemeMode.system,
+                            onTap: () => onThemeSelected(ThemeMode.system),
+                          ),
+                          _DrawerThemeChip(
+                            label: 'Light',
+                            icon: Icons.light_mode_outlined,
+                            selected: themeMode == ThemeMode.light,
+                            onTap: () => onThemeSelected(ThemeMode.light),
+                          ),
+                          _DrawerThemeChip(
+                            label: 'Dark',
+                            icon: Icons.dark_mode_outlined,
+                            selected: themeMode == ThemeMode.dark,
+                            onTap: () => onThemeSelected(ThemeMode.dark),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Card(
+                child: Column(
+                  children: [
+                    ListTile(
+                      leading: const Icon(Icons.person_outline),
+                      title: const Text('Profile'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () {
+                        Navigator.of(context).maybePop();
+                        onOpenProfile();
+                      },
+                    ),
+                    const Divider(height: 1),
+                    ListTile(
+                      leading: const Icon(Icons.info_outline),
+                      title: const Text('App version'),
+                      trailing: VersionLabel(
+                        packageInfoFuture: packageInfoFuture,
+                        centered: false,
+                        compact: true,
+                      ),
+                    ),
+                    const Divider(height: 1),
+                    ListTile(
+                      leading: const Icon(Icons.logout),
+                      title: const Text('Sign out'),
+                      onTap: () async {
+                        Navigator.of(context).maybePop();
+                        await onSignOut();
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DrawerThemeChip extends StatelessWidget {
+  const _DrawerThemeChip({
+    required this.label,
+    required this.icon,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final IconData icon;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(999),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 220),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         decoration: BoxDecoration(
-          color: theme.brightness == Brightness.dark
-              ? const Color(0xFF0F181C)
-              : const Color(0xFFF9FCFF),
-          border: Border(
-            top: BorderSide(color: theme.colorScheme.outlineVariant),
+          color: selected
+              ? theme.colorScheme.primaryContainer
+              : theme.colorScheme.surface,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(
+            color: selected
+                ? theme.colorScheme.primary.withValues(alpha: 0.24)
+                : theme.colorScheme.outlineVariant,
           ),
         ),
         child: Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Expanded(
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: VersionLabel(
-                  packageInfoFuture: packageInfoFuture,
-                  centered: false,
-                  compact: true,
-                ),
+            Icon(
+              icon,
+              size: 18,
+              color: selected
+                  ? theme.colorScheme.primary
+                  : theme.colorScheme.onSurfaceVariant,
+            ),
+            const SizedBox(width: 8),
+            Text(
+              label,
+              style: theme.textTheme.labelLarge?.copyWith(
+                color: selected
+                    ? theme.colorScheme.primary
+                    : theme.colorScheme.onSurface,
+                fontWeight: FontWeight.w700,
               ),
             ),
-            const SizedBox(width: 12),
-            ThemeModeButton(themeMode: themeMode, onSelected: onThemeSelected),
           ],
         ),
       ),
@@ -3931,40 +4092,10 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     );
                   }
-                  return LayoutBuilder(
-                    builder: (context, constraints) {
-                      final moversPanel = MarketLeaderPanel(
-                        title: 'Top movers',
-                        icon: Icons.local_fire_department_outlined,
-                        stocks: leaders?.topMovers ?? const [],
-                        positive: true,
-                        onStockTap: (stock) => _openStockDetail(stock),
-                      );
-                      final losersPanel = MarketLeaderPanel(
-                        title: 'Top losers',
-                        icon: Icons.trending_down_outlined,
-                        stocks: leaders?.topLosers ?? const [],
-                        positive: false,
-                        onStockTap: (stock) => _openStockDetail(stock),
-                      );
-                      if (constraints.maxWidth >= 900) {
-                        return Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(child: moversPanel),
-                            const SizedBox(width: 12),
-                            Expanded(child: losersPanel),
-                          ],
-                        );
-                      }
-                      return Column(
-                        children: [
-                          moversPanel,
-                          const SizedBox(height: 12),
-                          losersPanel,
-                        ],
-                      );
-                    },
+                  return MarketLeadersSlideshow(
+                    movers: leaders?.topMovers ?? const [],
+                    losers: leaders?.topLosers ?? const [],
+                    onStockTap: (stock) => _openStockDetail(stock),
                   );
                 },
               ),
@@ -6807,6 +6938,179 @@ class MetricCard extends StatelessWidget {
   }
 }
 
+class MarketLeadersSlideshow extends StatefulWidget {
+  const MarketLeadersSlideshow({
+    super.key,
+    required this.movers,
+    required this.losers,
+    this.onStockTap,
+  });
+
+  final List<Stock> movers;
+  final List<Stock> losers;
+  final ValueChanged<Stock>? onStockTap;
+
+  @override
+  State<MarketLeadersSlideshow> createState() => _MarketLeadersSlideshowState();
+}
+
+class _MarketLeadersSlideshowState extends State<MarketLeadersSlideshow> {
+  late final PageController _pageController = PageController();
+  Timer? _slideTimer;
+  int _pageIndex = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _configureTimer();
+  }
+
+  @override
+  void didUpdateWidget(covariant MarketLeadersSlideshow oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.movers.length != widget.movers.length ||
+        oldWidget.losers.length != widget.losers.length) {
+      _configureTimer();
+    }
+  }
+
+  @override
+  void dispose() {
+    _slideTimer?.cancel();
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  void _configureTimer() {
+    _slideTimer?.cancel();
+    if (widget.movers.isEmpty || widget.losers.isEmpty) return;
+    _slideTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (!mounted) return;
+      final next = (_pageIndex + 1) % 2;
+      _pageController.animateToPage(
+        next,
+        duration: const Duration(milliseconds: 520),
+        curve: Curves.easeInOutCubic,
+      );
+      setState(() => _pageIndex = next);
+    });
+  }
+
+  void _onPageChanged(int value) {
+    if (!mounted) return;
+    setState(() => _pageIndex = value);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final pages = [
+      (
+        title: 'Top gainers',
+        icon: Icons.local_fire_department_outlined,
+        stocks: widget.movers,
+        positive: true,
+      ),
+      (
+        title: 'Top losers',
+        icon: Icons.trending_down_outlined,
+        stocks: widget.losers,
+        positive: false,
+      ),
+    ];
+    final theme = Theme.of(context);
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Text(
+                  'Market leaders',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const Spacer(),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.primaryContainer,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    'Slide 5s',
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: theme.colorScheme.primary,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Top gainers and top losers swap position like a live market slideshow.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 14),
+            SizedBox(
+              height: 420,
+              child: PageView.builder(
+                controller: _pageController,
+                onPageChanged: _onPageChanged,
+                itemCount: pages.length,
+                itemBuilder: (context, index) {
+                  final page = pages[index];
+                  return Padding(
+                    padding: EdgeInsets.only(
+                      right: index == 0 ? 12 : 0,
+                      left: index == 1 ? 12 : 0,
+                    ),
+                    child: MarketLeaderPanel(
+                      title: page.title,
+                      icon: page.icon,
+                      stocks: page.stocks,
+                      positive: page.positive,
+                      onStockTap: widget.onStockTap,
+                    ),
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 14),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                for (var i = 0; i < pages.length; i++) ...[
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 220),
+                    width: i == _pageIndex ? 22 : 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      color: i == _pageIndex
+                          ? theme.colorScheme.primary
+                          : theme.colorScheme.primary.withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  ),
+                  if (i != pages.length - 1) const SizedBox(width: 6),
+                ],
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class MarketLeaderPanel extends StatefulWidget {
   const MarketLeaderPanel({
     super.key,
@@ -6828,14 +7132,7 @@ class MarketLeaderPanel extends StatefulWidget {
 }
 
 class _MarketLeaderPanelState extends State<MarketLeaderPanel> {
-  Timer? _rotationTimer;
   int _activeIndex = 0;
-
-  @override
-  void initState() {
-    super.initState();
-    _configureRotation();
-  }
 
   @override
   void didUpdateWidget(covariant MarketLeaderPanel oldWidget) {
@@ -6843,14 +7140,7 @@ class _MarketLeaderPanelState extends State<MarketLeaderPanel> {
     if (oldWidget.stocks.length != widget.stocks.length ||
         !_sameStockSequence(oldWidget.stocks, widget.stocks)) {
       _activeIndex = 0;
-      _configureRotation();
     }
-  }
-
-  @override
-  void dispose() {
-    _rotationTimer?.cancel();
-    super.dispose();
   }
 
   bool _sameStockSequence(List<Stock> previous, List<Stock> next) {
@@ -6859,17 +7149,6 @@ class _MarketLeaderPanelState extends State<MarketLeaderPanel> {
       if (previous[i].symbol != next[i].symbol) return false;
     }
     return true;
-  }
-
-  void _configureRotation() {
-    _rotationTimer?.cancel();
-    if (widget.stocks.length <= 1) return;
-    _rotationTimer = Timer.periodic(const Duration(seconds: 5), (_) {
-      if (!mounted || widget.stocks.length <= 1) return;
-      setState(() {
-        _activeIndex = (_activeIndex + 1) % widget.stocks.length;
-      });
-    });
   }
 
   void _selectIndex(int value) {
@@ -6929,30 +7208,12 @@ class _MarketLeaderPanelState extends State<MarketLeaderPanel> {
                     ),
                   ),
                 ),
-                if (stocks.length > 1)
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: color.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                    child: Text(
-                      'Live 5s',
-                      style: theme.textTheme.labelMedium?.copyWith(
-                        color: color,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
               ],
             ),
             const SizedBox(height: 6),
             Text(
               stocks.length > 1
-                  ? 'Auto-rotating market pulse. Tap any card to open details.'
+                  ? 'Tap any ticker below to switch focus and open details.'
                   : 'Tap to open details.',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
@@ -7056,37 +7317,20 @@ class _MarketLeaderPanelState extends State<MarketLeaderPanel> {
               ),
             if (stocks.length > 1) ...[
               const SizedBox(height: 14),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  for (var i = 0; i < stocks.length; i++)
-                    _LeaderTickerChip(
-                      stock: stocks[i],
-                      selected: i == activeIndex,
-                      accent: color,
-                      onTap: () => _selectIndex(i),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  for (var i = 0; i < stocks.length; i++) ...[
-                    AnimatedContainer(
-                      duration: const Duration(milliseconds: 250),
-                      width: i == activeIndex ? 22 : 8,
-                      height: 8,
-                      decoration: BoxDecoration(
-                        color: i == activeIndex
-                            ? color
-                            : color.withValues(alpha: 0.22),
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                    ),
-                    if (i != stocks.length - 1) const SizedBox(width: 6),
-                  ],
-                ],
+              SizedBox(
+                height: 42,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: stocks.length,
+                  separatorBuilder: (context, index) =>
+                      const SizedBox(width: 8),
+                  itemBuilder: (context, i) => _LeaderTickerChip(
+                    stock: stocks[i],
+                    selected: i == activeIndex,
+                    accent: color,
+                    onTap: () => _selectIndex(i),
+                  ),
+                ),
               ),
             ],
           ],
@@ -7548,6 +7792,10 @@ class PriceChart extends StatelessWidget {
     final secondary = Theme.of(context).colorScheme.tertiary;
     final latest = points.last;
     final earliest = points.first;
+    final showYearOnAxis =
+        rangeLabel == '1Y' ||
+        rangeLabel == '2Y' ||
+        latest.date.year != earliest.date.year;
     final dateRangeLabel =
         '${DateFormat.MMMd().format(earliest.date)} - ${DateFormat.MMMd().format(latest.date)}';
 
@@ -7632,10 +7880,13 @@ class PriceChart extends StatelessWidget {
                       if (index < 0 || index >= points.length) {
                         return const SizedBox.shrink();
                       }
+                      final point = points[index];
                       return Padding(
                         padding: const EdgeInsets.only(top: 8),
                         child: Text(
-                          DateFormat.MMM().format(points[index].date),
+                          showYearOnAxis
+                              ? DateFormat('MMM yy').format(point.date)
+                              : DateFormat.MMM().format(point.date),
                           style: theme.textTheme.labelSmall?.copyWith(
                             color: theme.colorScheme.onSurfaceVariant,
                           ),
