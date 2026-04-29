@@ -22,9 +22,10 @@ from .ngx_client import (
     discover_stock_ngx_id,
     fetch_all_stocks_from_ngx_cached,
     fetch_company_news_cached,
-    fetch_company_news_from_ngx,
+    fetch_disclosures_cached,
+    fetch_dividend_history_cached,
     fetch_market_snapshot_cached,
-    fetch_market_snapshot_from_ngx,
+    fetch_market_news_cached,
     fetch_stock_logo,
 )
 from .push import PushDeliveryError, dispatch_market_price_alerts, remove_push_token, send_push_message, upsert_push_token
@@ -33,12 +34,15 @@ from .schemas import (
     AccountDeletionRequestCreate,
     AccountDeletionRequestOut,
     CompanyNewsOut,
+    DisclosureOut,
+    DividendHistoryOut,
     HoldingOut,
     HoldingUpsert,
     LoginRequest,
     MarketIdeasOut,
     MarketIdeaOut,
     MarketLeadersOut,
+    MarketNewsOut,
     MarketSnapshotOut,
     MarketStatusOut,
     MessageResponse,
@@ -324,6 +328,14 @@ def ensure_stock_ngx_id(db: Session, stock: Stock) -> str | None:
     return stock.ngx_id
 
 
+def stock_history_source(stock: Stock) -> str | None:
+    if settings.ngxpulse_enabled:
+        return "ngxpulse_history"
+    if stock.ngx_id:
+        return "ngx_chart"
+    return None
+
+
 async def background_stock_sync_loop() -> None:
     interval = max(1, settings.stock_sync_interval_seconds)
     while True:
@@ -455,6 +467,17 @@ def public_market_leaders(
     db: Session = Depends(get_db),
 ) -> dict:
     return market_leaders_payload(db, limit)
+
+
+@app.get("/public/market/news", response_model=list[MarketNewsOut], include_in_schema=False)
+def public_market_news(limit: int = Query(default=6, ge=1, le=20)) -> list[dict]:
+    if not settings.ngxpulse_enabled:
+        return []
+    try:
+        return fetch_market_news_cached(limit)
+    except NgxFetchError as exc:
+        logger.warning("Public market news fetch failed: %s", exc)
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @app.get("/public/privacy-policy", include_in_schema=False, response_class=HTMLResponse)
@@ -848,6 +871,20 @@ def get_market_leaders(
     return market_leaders_payload(db, limit)
 
 
+@app.get("/market/news", response_model=list[MarketNewsOut])
+def get_market_news(
+    limit: int = Query(default=6, ge=1, le=20),
+    _: User = Depends(get_current_user),
+) -> list[dict]:
+    if not settings.ngxpulse_enabled:
+        return []
+    try:
+        return fetch_market_news_cached(limit)
+    except NgxFetchError as exc:
+        logger.warning("Market news fetch failed: %s", exc)
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
 @app.get("/market/ideas", response_model=MarketIdeasOut)
 def get_market_ideas(
     limit: int = Query(default=5, ge=1, le=10),
@@ -898,6 +935,44 @@ def get_stock_company_news(
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
+@app.get("/stocks/{symbol}/dividends", response_model=list[DividendHistoryOut])
+def get_stock_dividends(
+    symbol: str,
+    limit: int = Query(default=8, ge=1, le=50),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> list[dict]:
+    stock = db.get(Stock, symbol.strip().upper())
+    if stock is None:
+        raise HTTPException(status_code=404, detail="Stock not found")
+    if not settings.ngxpulse_enabled:
+        return []
+    try:
+        return fetch_dividend_history_cached(stock.symbol, limit)
+    except NgxFetchError as exc:
+        logger.warning("Dividend history fetch failed for %s: %s", stock.symbol, exc)
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.get("/stocks/{symbol}/disclosures", response_model=list[DisclosureOut])
+def get_stock_disclosures(
+    symbol: str,
+    limit: int = Query(default=8, ge=1, le=50),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> list[dict]:
+    stock = db.get(Stock, symbol.strip().upper())
+    if stock is None:
+        raise HTTPException(status_code=404, detail="Stock not found")
+    if not settings.ngxpulse_enabled:
+        return []
+    try:
+        return fetch_disclosures_cached(stock.symbol, limit)
+    except NgxFetchError as exc:
+        logger.warning("Disclosures fetch failed for %s: %s", stock.symbol, exc)
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
 @app.get("/stocks/{symbol}/history", response_model=list[StockPriceOut])
 def get_stock_history(
     symbol: str,
@@ -909,15 +984,15 @@ def get_stock_history(
     if stock is None:
         raise HTTPException(status_code=404, detail="Stock not found")
 
-    ngx_id = ensure_stock_ngx_id(db, stock)
+    ngx_id = stock.ngx_id if settings.ngxpulse_enabled else ensure_stock_ngx_id(db, stock)
     since = date.today() - relativedelta(months=months)
     rows = stock_history_query(db, symbol, since)
-    if ngx_id and (
+    if stock.supports_history and (
         not rows
         or any(row.open_price is None for row in rows)
         or stock_history_is_stale(rows)
     ):
-        upsert_stock_history(db, stock.symbol, ngx_id)
+        upsert_stock_history(db, stock.symbol, ngx_id, since=since)
         db.commit()
         rows = stock_history_query(db, symbol, since)
     return rows
@@ -936,8 +1011,10 @@ def build_stock_detail(
     ngx_id = ensure_stock_ngx_id(db, stock)
     since = date.today() - relativedelta(months=months)
     rows = stock_history_query(db, symbol, since)
-    if ngx_id and (not rows or any(row.open_price is None for row in rows) or stock_history_is_stale(rows)):
-        upsert_stock_history(db, stock.symbol, ngx_id)
+    if stock.supports_history and (
+        not rows or any(row.open_price is None for row in rows) or stock_history_is_stale(rows)
+    ):
+        upsert_stock_history(db, stock.symbol, ngx_id, since=since)
         db.commit()
         db.refresh(stock)
         rows = stock_history_query(db, symbol, since)
@@ -955,11 +1032,26 @@ def build_stock_detail(
         except NgxFetchError as exc:
             logger.warning("Company news fetch failed for %s detail: %s", stock.symbol, exc)
 
+    dividends: list[dict] = []
+    disclosures: list[dict] = []
+    if settings.ngxpulse_enabled:
+        try:
+            dividends = fetch_dividend_history_cached(stock.symbol, 6)
+        except NgxFetchError as exc:
+            logger.warning("Dividend history fetch failed for %s detail: %s", stock.symbol, exc)
+        try:
+            disclosures = fetch_disclosures_cached(stock.symbol, news_limit)
+        except NgxFetchError as exc:
+            logger.warning("Disclosures fetch failed for %s detail: %s", stock.symbol, exc)
+
     return {
         "stock": stock,
         "history": rows,
         "market_snapshot": market_snapshot,
+        "history_source": stock_history_source(stock),
         "news": news,
+        "dividends": dividends,
+        "disclosures": disclosures,
     }
 
 

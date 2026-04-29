@@ -96,6 +96,7 @@ class StockOut(BaseModel):
     margin: float | None = None
     source: str | None = None
     updated_at: datetime | None = None
+    supports_history: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -189,11 +190,44 @@ class CompanyNewsOut(BaseModel):
     submission_type: str | None = None
 
 
+class DividendHistoryOut(BaseModel):
+    symbol: str | None = None
+    company_name: str | None = None
+    ex_dividend_date: date | None = None
+    record_date: date | None = None
+    pay_date: date | None = None
+    dividend_per_share: float | None = None
+    currency: str | None = None
+
+
+class DisclosureOut(BaseModel):
+    title: str | None = None
+    url: str | None = None
+    published_at: datetime | None = None
+    symbol: str | None = None
+    company_name: str | None = None
+    category: str | None = None
+    summary: str | None = None
+    source: str | None = None
+
+
+class MarketNewsOut(BaseModel):
+    title: str | None = None
+    url: str | None = None
+    published_at: datetime | None = None
+    source: str | None = None
+    summary: str | None = None
+    image_url: str | None = None
+
+
 class StockDetailOut(BaseModel):
     stock: StockOut
     history: list[StockPriceOut]
     market_snapshot: MarketSnapshotOut | None = None
+    history_source: str | None = None
     news: list[CompanyNewsOut] = []
+    dividends: list[DividendHistoryOut] = []
+    disclosures: list[DisclosureOut] = []
 
 
 class MarketLeadersOut(BaseModel):

@@ -165,10 +165,21 @@ def get_cached_market_status(db: Session) -> dict:
     return market_status_to_dict(cached, stale=bool(cached.message))
 
 
-def upsert_stock_history(db: Session, symbol: str, ngx_id: str) -> int:
+def upsert_stock_history(
+    db: Session,
+    symbol: str,
+    ngx_id: str | None,
+    *,
+    since: date | None = None,
+) -> int:
     source = "ngxpulse_history" if get_settings().ngxpulse_enabled else "ngx_chart"
     try:
-        rows = fetch_historical_prices_cached(symbol, ngx_id)
+        rows = fetch_historical_prices_cached(
+            symbol,
+            ngx_id,
+            from_date=since,
+            to_date=date.today(),
+        )
     except NgxFetchError as exc:
         record_sync_log(
             db,

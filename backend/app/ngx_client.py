@@ -94,6 +94,48 @@ def _first(item: dict[str, Any], keys: list[str]) -> Any:
     return None
 
 
+def _parse_date(value: Any) -> date | None:
+    if value in (None, ""):
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return date.fromisoformat(text[:10])
+    except ValueError:
+        return None
+
+
+def _parse_datetime(value: Any) -> datetime | None:
+    if value in (None, ""):
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    normalized = text.replace("Z", "+00:00")
+    try:
+        return datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+
+
+def _list_payload(payload: Any, keys: list[str]) -> list[Any]:
+    if isinstance(payload, list):
+        return payload
+    if isinstance(payload, dict):
+        for key in keys:
+            value = payload.get(key)
+            if isinstance(value, list):
+                return value
+        data = payload.get("data")
+        if isinstance(data, dict):
+            for key in keys:
+                value = data.get(key)
+                if isinstance(value, list):
+                    return value
+    return []
+
+
 def normalize_stock(raw: dict[str, Any], source: str) -> dict[str, Any] | None:
     symbol = _first(raw, ["SYMBOL", "symbol", "ticker", "code", "Symbol", "Ticker"])
     if not symbol:
@@ -116,16 +158,32 @@ def normalize_stock(raw: dict[str, Any], source: str) -> dict[str, Any] | None:
         )
     )
     previous_close = _number(_first(raw, ["previous_close", "previousClose", "pclose", "prevClose"]))
-    raw_price_move = _number(
-        _first(raw, ["Change", "change", "PercChange", "percent_change", "changePercent", "percentageChange", "Change %"])
+    raw_absolute_change = _number(
+        _first(raw, ["Change", "change", "change_amount", "changeAmount", "price_change", "absolute_change"])
+    )
+    raw_percent_change = _number(
+        _first(
+            raw,
+            [
+                "PercChange",
+                "percent_change",
+                "change_percent",
+                "changePercent",
+                "percentageChange",
+                "Change %",
+                "pct_change",
+            ],
+        )
     )
     open_price = _number(_first(raw, ["Open", "open", "open_price"]))
-    if previous_close in (None, 0) and last_price not in (None, 0) and raw_price_move is not None:
-        previous_close = last_price / (1 + (raw_price_move / 100)) if raw_price_move != -100 else None
-    if open_price in (None, 0) and last_price is not None and raw_price_move is not None:
-        derived_open = last_price - raw_price_move
-        if derived_open > 0:
-            open_price = derived_open
+    if previous_close in (None, 0) and last_price not in (None, 0) and raw_percent_change is not None:
+        previous_close = last_price / (1 + (raw_percent_change / 100)) if raw_percent_change != -100 else None
+    if previous_close in (None, 0) and last_price is not None and raw_absolute_change is not None:
+        derived_previous_close = last_price - raw_absolute_change
+        if derived_previous_close > 0:
+            previous_close = derived_previous_close
+    if open_price in (None, 0) and previous_close not in (None, 0):
+        open_price = previous_close
     high_price = _number(_first(raw, ["High", "high", "high_price", "dayHigh"]))
     low_price = _number(_first(raw, ["Low", "low", "low_price", "dayLow"]))
     ngx_id = _first(raw, ["ngx_id", "ngxId", "isin", "ISIN"])
@@ -143,12 +201,18 @@ def normalize_stock(raw: dict[str, Any], source: str) -> dict[str, Any] | None:
     reference_price = previous_close if previous_close not in (None, 0) else open_price
     computed_change: float | None = None
     computed_percent_change: float | None = None
-    if raw_price_move is not None and open_price not in (None, 0):
-        computed_change = raw_price_move
-        computed_percent_change = (computed_change / open_price) * 100
-    elif last_price is not None and reference_price not in (None, 0):
+    if last_price is not None and reference_price not in (None, 0):
         computed_change = last_price - reference_price
         computed_percent_change = (computed_change / reference_price) * 100
+    if raw_absolute_change is not None and reference_price not in (None, 0):
+        computed_change = raw_absolute_change
+        computed_percent_change = (computed_change / reference_price) * 100
+    if raw_percent_change is not None:
+        computed_percent_change = raw_percent_change
+        if computed_change is None and reference_price not in (None, 0):
+            computed_change = reference_price * (raw_percent_change / 100)
+    elif last_price is not None and reference_price not in (None, 0):
+        computed_change = last_price - reference_price
 
     return {
         "symbol": symbol_text,
@@ -170,11 +234,11 @@ def normalize_stock(raw: dict[str, Any], source: str) -> dict[str, Any] | None:
                 else None
             )
         ),
-        "change": computed_change if computed_change is not None else raw_price_move,
+        "change": computed_change if computed_change is not None else raw_absolute_change,
         "percent_change": (
             computed_percent_change
             if computed_percent_change is not None
-            else raw_price_move
+            else raw_percent_change
         ),
         "margin": margin,
         "source": source,
@@ -230,18 +294,24 @@ def fetch_all_stocks_from_ngx_cached() -> list[dict[str, Any]]:
     return fetch_all_stocks_from_ngx()
 
 
-def fetch_historical_prices(symbol: str, ngx_id: str | None = None) -> list[dict[str, Any]]:
+def fetch_historical_prices(
+    symbol: str,
+    ngx_id: str | None = None,
+    *,
+    from_date: date | None = None,
+    to_date: date | None = None,
+) -> list[dict[str, Any]]:
     settings = get_settings()
     normalized_symbol = symbol.strip().upper()
     if settings.ngxpulse_enabled:
-        today = date.today()
-        from_date = today - timedelta(days=365 * 5)
+        end_date = to_date or date.today()
+        start_date = from_date or (end_date - timedelta(days=365 * 5))
         try:
             response = _get_session().get(
                 f"{settings.ngxpulse_base_url}/api/ngxdata/prices/{normalized_symbol}",
                 params={
-                    "from": from_date.isoformat(),
-                    "to": today.isoformat(),
+                    "from": start_date.isoformat(),
+                    "to": end_date.isoformat(),
                 },
                 headers=_ngxpulse_headers(),
                 timeout=20,
@@ -261,12 +331,8 @@ def fetch_historical_prices(symbol: str, ngx_id: str | None = None) -> list[dict
         for item in prices:
             if not isinstance(item, dict):
                 continue
-            trade_date = item.get("trade_date")
-            if not trade_date:
-                continue
-            try:
-                parsed_date = date.fromisoformat(str(trade_date))
-            except ValueError:
+            parsed_date = _parse_date(item.get("trade_date"))
+            if parsed_date is None:
                 continue
             rows.append(
                 {
@@ -559,6 +625,125 @@ def fetch_company_news_from_ngx(ngx_id: str) -> list[dict[str, Any]]:
     return items
 
 
+def fetch_dividend_history_from_ngxpulse(symbol: str, limit: int = 8) -> list[dict[str, Any]]:
+    settings = get_settings()
+    normalized_symbol = symbol.strip().upper()
+    try:
+        response = _get_session().get(
+            f"{settings.ngxpulse_base_url}/api/ngxdata/dividends/{normalized_symbol}",
+            params={"limit": limit},
+            headers=_ngxpulse_headers(),
+            timeout=15,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except requests.RequestException as exc:
+        raise NgxFetchError(f"NGX Pulse dividend history request failed for {normalized_symbol}: {exc}") from exc
+    except ValueError as exc:
+        raise NgxFetchError(f"NGX Pulse dividend history response was not valid JSON for {normalized_symbol}: {exc}") from exc
+
+    history = _list_payload(payload, ["history", "dividends", "results", "items"])
+    items: list[dict[str, Any]] = []
+    for item in history:
+        if not isinstance(item, dict):
+            continue
+        items.append(
+            {
+                "symbol": _first(item, ["symbol"]) or normalized_symbol,
+                "company_name": _first(item, ["company_name", "company", "name"]),
+                "ex_dividend_date": _parse_date(_first(item, ["ex_dividend_date", "exDate"])),
+                "record_date": _parse_date(_first(item, ["record_date", "recordDate"])),
+                "pay_date": _parse_date(_first(item, ["pay_date", "payment_date", "payDate"])),
+                "dividend_per_share": _number(
+                    _first(item, ["dividend_per_share", "dividend", "dividend_amount", "amount"])
+                ),
+                "currency": _first(item, ["currency"]),
+            }
+        )
+    return items
+
+
+def fetch_disclosures_from_ngxpulse(symbol: str | None = None, limit: int = 8) -> list[dict[str, Any]]:
+    settings = get_settings()
+    params: dict[str, Any] = {"limit": limit}
+    if symbol:
+        params["symbol"] = symbol.strip().upper()
+    try:
+        response = _get_session().get(
+            f"{settings.ngxpulse_base_url}/api/ngxdata/disclosures",
+            params=params,
+            headers=_ngxpulse_headers(),
+            timeout=15,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except requests.RequestException as exc:
+        raise NgxFetchError(f"NGX Pulse disclosures request failed: {exc}") from exc
+    except ValueError as exc:
+        raise NgxFetchError(f"NGX Pulse disclosures response was not valid JSON: {exc}") from exc
+
+    disclosures = _list_payload(payload, ["disclosures", "results", "items", "data"])
+    symbol_filter = symbol.strip().upper() if symbol else None
+    items: list[dict[str, Any]] = []
+    for item in disclosures:
+        if not isinstance(item, dict):
+            continue
+        item_symbol = _first(item, ["symbol", "ticker", "stock_symbol"])
+        if symbol_filter and item_symbol and str(item_symbol).strip().upper() != symbol_filter:
+            continue
+        items.append(
+            {
+                "title": _first(item, ["title", "headline", "subject", "name"]),
+                "url": _first(item, ["url", "link", "document_url"]),
+                "published_at": _parse_datetime(
+                    _first(item, ["published_at", "publishedAt", "date", "created_at", "timestamp"])
+                ),
+                "symbol": str(item_symbol).strip().upper() if item_symbol else symbol_filter,
+                "company_name": _first(item, ["company_name", "company", "issuer", "name"]),
+                "category": _first(item, ["category", "type", "submission_type"]),
+                "summary": _first(item, ["summary", "description", "excerpt"]),
+                "source": "ngxpulse_disclosures",
+            }
+        )
+    return items[:limit]
+
+
+def fetch_market_news_from_ngxpulse(limit: int = 8) -> list[dict[str, Any]]:
+    settings = get_settings()
+    try:
+        response = _get_session().get(
+            f"{settings.ngxpulse_base_url}/api/news",
+            params={"limit": limit},
+            headers=_ngxpulse_headers(),
+            timeout=15,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except requests.RequestException as exc:
+        raise NgxFetchError(f"NGX Pulse market news request failed: {exc}") from exc
+    except ValueError as exc:
+        raise NgxFetchError(f"NGX Pulse market news response was not valid JSON: {exc}") from exc
+
+    stories = _list_payload(payload, ["news", "articles", "items", "results", "data"])
+    items: list[dict[str, Any]] = []
+    for item in stories:
+        if not isinstance(item, dict):
+            continue
+        items.append(
+            {
+                "title": _first(item, ["title", "headline", "name"]),
+                "url": _first(item, ["url", "link"]),
+                "published_at": _parse_datetime(
+                    _first(item, ["published_at", "publishedAt", "date", "created_at", "timestamp"])
+                ),
+                "source": _first(item, ["source", "publisher"]),
+                "summary": _first(item, ["summary", "description", "excerpt"]),
+                "image_url": _first(item, ["image_url", "image", "thumbnail"]),
+            }
+        )
+    return items[:limit]
+
+
 @_ttl_cache(ttl_seconds=60)
 def fetch_market_snapshot_cached() -> dict[str, Any]:
     return fetch_market_snapshot_from_ngx()
@@ -573,8 +758,26 @@ def fetch_company_news_cached(ngx_id: str) -> list[dict[str, Any]]:
 def fetch_historical_prices_cached(
     symbol: str,
     ngx_id: str | None = None,
+    *,
+    from_date: date | None = None,
+    to_date: date | None = None,
 ) -> list[dict[str, Any]]:
-    return fetch_historical_prices(symbol, ngx_id)
+    return fetch_historical_prices(symbol, ngx_id, from_date=from_date, to_date=to_date)
+
+
+@_ttl_cache(ttl_seconds=900)
+def fetch_dividend_history_cached(symbol: str, limit: int = 8) -> list[dict[str, Any]]:
+    return fetch_dividend_history_from_ngxpulse(symbol, limit)
+
+
+@_ttl_cache(ttl_seconds=300)
+def fetch_disclosures_cached(symbol: str | None = None, limit: int = 8) -> list[dict[str, Any]]:
+    return fetch_disclosures_from_ngxpulse(symbol, limit)
+
+
+@_ttl_cache(ttl_seconds=300)
+def fetch_market_news_cached(limit: int = 8) -> list[dict[str, Any]]:
+    return fetch_market_news_from_ngxpulse(limit)
 
 
 def legacy_seed_stocks() -> list[dict[str, Any]]:

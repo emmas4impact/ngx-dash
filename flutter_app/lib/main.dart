@@ -1025,6 +1025,29 @@ class ApiClient {
     );
   }
 
+  Future<List<MarketNewsItem>> marketNews({int limit = 6}) async {
+    final response = await _client.get(
+      _uri('/market/news', {'limit': '$limit'}),
+      headers: _headers,
+    );
+    _expect(response, 200);
+    final data = jsonDecode(response.body) as List<dynamic>;
+    return data
+        .map((item) => MarketNewsItem.fromJson(item as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<List<MarketNewsItem>> publicMarketNews({int limit = 6}) async {
+    final response = await _client.get(
+      _uri('/public/market/news', {'limit': '$limit'}),
+    );
+    _expect(response, 200);
+    final data = jsonDecode(response.body) as List<dynamic>;
+    return data
+        .map((item) => MarketNewsItem.fromJson(item as Map<String, dynamic>))
+        .toList();
+  }
+
   Future<List<CompanyNewsItem>> companyNews(String symbol) async {
     final response = await _client.get(
       _uri('/stocks/$symbol/company-news', {'limit': '5'}),
@@ -1103,6 +1126,7 @@ class Stock {
     this.marketCap,
     this.sector,
     this.ngxId,
+    this.supportsHistory = false,
     this.updatedAt,
   });
 
@@ -1117,9 +1141,10 @@ class Stock {
   final double? marketCap;
   final String? sector;
   final String? ngxId;
+  final bool supportsHistory;
   final DateTime? updatedAt;
 
-  bool get hasChart => ngxId != null && ngxId!.isNotEmpty;
+  bool get hasChart => supportsHistory;
 
   factory Stock.fromJson(Map<String, dynamic> json) {
     return Stock(
@@ -1134,6 +1159,7 @@ class Stock {
       marketCap: asDouble(json['market_cap']),
       sector: json['sector'] as String?,
       ngxId: json['ngx_id'] as String?,
+      supportsHistory: json['supports_history'] == true,
       updatedAt: json['updated_at'] == null
           ? null
           : DateTime.tryParse(json['updated_at'] as String),
@@ -1200,17 +1226,25 @@ class StockDetailBundle {
     required this.stock,
     required this.history,
     this.marketSnapshot,
+    this.historySource,
     required this.news,
+    required this.dividends,
+    required this.disclosures,
   });
 
   final Stock stock;
   final List<PricePoint> history;
   final MarketSnapshot? marketSnapshot;
+  final String? historySource;
   final List<CompanyNewsItem> news;
+  final List<DividendRecord> dividends;
+  final List<DisclosureItem> disclosures;
 
   factory StockDetailBundle.fromJson(Map<String, dynamic> json) {
     final historyJson = json['history'] as List<dynamic>? ?? const [];
     final newsJson = json['news'] as List<dynamic>? ?? const [];
+    final dividendsJson = json['dividends'] as List<dynamic>? ?? const [];
+    final disclosuresJson = json['disclosures'] as List<dynamic>? ?? const [];
     return StockDetailBundle(
       stock: Stock.fromJson(json['stock'] as Map<String, dynamic>),
       history: historyJson
@@ -1221,8 +1255,15 @@ class StockDetailBundle {
           : MarketSnapshot.fromJson(
               json['market_snapshot'] as Map<String, dynamic>,
             ),
+      historySource: json['history_source'] as String?,
       news: newsJson
           .map((item) => CompanyNewsItem.fromJson(item as Map<String, dynamic>))
+          .toList(),
+      dividends: dividendsJson
+          .map((item) => DividendRecord.fromJson(item as Map<String, dynamic>))
+          .toList(),
+      disclosures: disclosuresJson
+          .map((item) => DisclosureItem.fromJson(item as Map<String, dynamic>))
           .toList(),
     );
   }
@@ -1509,10 +1550,15 @@ class MarketLeaders {
 }
 
 class LandingMarketData {
-  LandingMarketData({required this.status, required this.leaders});
+  LandingMarketData({
+    required this.status,
+    required this.leaders,
+    required this.news,
+  });
 
   final MarketStatus status;
   final MarketLeaders leaders;
+  final List<MarketNewsItem> news;
 }
 
 class PushStatusSummary {
@@ -1565,6 +1611,112 @@ class CompanyNewsItem {
           : DateTime.tryParse(json['modified'] as String),
       ngxId: json['ngx_id'] as String?,
       submissionType: json['submission_type'] as String?,
+    );
+  }
+}
+
+class DividendRecord {
+  DividendRecord({
+    this.symbol,
+    this.companyName,
+    this.exDividendDate,
+    this.recordDate,
+    this.payDate,
+    this.dividendPerShare,
+    this.currency,
+  });
+
+  final String? symbol;
+  final String? companyName;
+  final DateTime? exDividendDate;
+  final DateTime? recordDate;
+  final DateTime? payDate;
+  final double? dividendPerShare;
+  final String? currency;
+
+  factory DividendRecord.fromJson(Map<String, dynamic> json) {
+    return DividendRecord(
+      symbol: json['symbol'] as String?,
+      companyName: json['company_name'] as String?,
+      exDividendDate: json['ex_dividend_date'] == null
+          ? null
+          : DateTime.tryParse(json['ex_dividend_date'] as String),
+      recordDate: json['record_date'] == null
+          ? null
+          : DateTime.tryParse(json['record_date'] as String),
+      payDate: json['pay_date'] == null
+          ? null
+          : DateTime.tryParse(json['pay_date'] as String),
+      dividendPerShare: asDouble(json['dividend_per_share']),
+      currency: json['currency'] as String?,
+    );
+  }
+}
+
+class DisclosureItem {
+  DisclosureItem({
+    this.title,
+    this.url,
+    this.publishedAt,
+    this.symbol,
+    this.companyName,
+    this.category,
+    this.summary,
+    this.source,
+  });
+
+  final String? title;
+  final String? url;
+  final DateTime? publishedAt;
+  final String? symbol;
+  final String? companyName;
+  final String? category;
+  final String? summary;
+  final String? source;
+
+  factory DisclosureItem.fromJson(Map<String, dynamic> json) {
+    return DisclosureItem(
+      title: json['title'] as String?,
+      url: json['url'] as String?,
+      publishedAt: json['published_at'] == null
+          ? null
+          : DateTime.tryParse(json['published_at'] as String),
+      symbol: json['symbol'] as String?,
+      companyName: json['company_name'] as String?,
+      category: json['category'] as String?,
+      summary: json['summary'] as String?,
+      source: json['source'] as String?,
+    );
+  }
+}
+
+class MarketNewsItem {
+  MarketNewsItem({
+    this.title,
+    this.url,
+    this.publishedAt,
+    this.source,
+    this.summary,
+    this.imageUrl,
+  });
+
+  final String? title;
+  final String? url;
+  final DateTime? publishedAt;
+  final String? source;
+  final String? summary;
+  final String? imageUrl;
+
+  factory MarketNewsItem.fromJson(Map<String, dynamic> json) {
+    return MarketNewsItem(
+      title: json['title'] as String?,
+      url: json['url'] as String?,
+      publishedAt: json['published_at'] == null
+          ? null
+          : DateTime.tryParse(json['published_at'] as String),
+      source: json['source'] as String?,
+      summary: json['summary'] as String?,
+      imageUrl: json['image_url'] as String?,
     );
   }
 }
@@ -1733,7 +1885,13 @@ class _AuthScreenState extends State<AuthScreen> {
   Future<LandingMarketData> _loadLandingData() async {
     final status = await widget.api.publicMarketStatus();
     final leaders = await widget.api.publicMarketLeaders(limit: 6);
-    return LandingMarketData(status: status, leaders: leaders);
+    List<MarketNewsItem> news = const [];
+    try {
+      news = await widget.api.publicMarketNews(limit: 6);
+    } catch (_) {
+      news = const [];
+    }
+    return LandingMarketData(status: status, leaders: leaders, news: news);
   }
 
   bool _validateAuthForm() {
@@ -2406,6 +2564,15 @@ class _LandingMarketView extends StatelessWidget {
             );
           },
         ),
+        if (landing?.news.isNotEmpty == true) ...[
+          const SizedBox(height: 16),
+          MarketNewsPanel(
+            title: 'Market news',
+            subtitle:
+                'Latest NGX Pulse headlines are available on web and mobile from the same feed.',
+            news: landing!.news,
+          ),
+        ],
       ],
     );
   }
@@ -3096,6 +3263,8 @@ class LandingStockDetailSheet extends StatelessWidget {
         final latest = points.isEmpty ? null : points.last;
         final marketSnapshot = detail?.marketSnapshot;
         final news = detail?.news ?? [];
+        final dividends = detail?.dividends ?? [];
+        final disclosures = detail?.disclosures ?? [];
         final loading = snapshot.connectionState == ConnectionState.waiting;
 
         return Material(
@@ -3149,6 +3318,15 @@ class LandingStockDetailSheet extends StatelessWidget {
                             points: points,
                             symbolLabel: resolvedStock.symbol,
                           ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    detail?.historySource == 'ngxpulse_history'
+                        ? 'Powered by NGX Pulse historical daily prices and cached inside Stockfolio.'
+                        : 'Chart history is loaded from the available market data feed for this stock.',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
                   ),
                   const SizedBox(height: 16),
                   Wrap(
@@ -3205,6 +3383,34 @@ class LandingStockDetailSheet extends StatelessWidget {
                       ),
                     ],
                   ),
+                  const SizedBox(height: 18),
+                  Text(
+                    'Dividend history',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 8),
+                  if (dividends.isEmpty)
+                    Text(
+                      loading
+                          ? 'Loading dividend history...'
+                          : 'No recent dividend history available.',
+                    )
+                  else
+                    ...dividends.map((item) => DividendTile(item: item)),
+                  const SizedBox(height: 18),
+                  Text(
+                    'Recent disclosures',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 8),
+                  if (disclosures.isEmpty)
+                    Text(
+                      loading
+                          ? 'Loading disclosures...'
+                          : 'No recent disclosures available.',
+                    )
+                  else
+                    ...disclosures.map((item) => DisclosureTile(item: item)),
                   const SizedBox(height: 18),
                   Text(
                     'Company updates',
@@ -4215,6 +4421,7 @@ class _HomeScreenState extends State<HomeScreen> {
   late Future<List<Holding>> holdingsFuture = widget.api.holdings();
   late Future<MarketLeaders> leadersFuture = widget.api.marketLeaders();
   late Future<MarketIdeasBundle> ideasFuture = widget.api.marketIdeas();
+  late Future<List<MarketNewsItem>> newsFuture = widget.api.marketNews();
   Timer? refreshTimer;
 
   @override
@@ -4236,6 +4443,7 @@ class _HomeScreenState extends State<HomeScreen> {
       holdingsFuture = widget.api.holdings();
       leadersFuture = widget.api.marketLeaders();
       ideasFuture = widget.api.marketIdeas();
+      newsFuture = widget.api.marketNews();
     });
   }
 
@@ -4406,6 +4614,31 @@ class _HomeScreenState extends State<HomeScreen> {
                     return const SizedBox.shrink();
                   }
                   return MarketIdeasPanel(bundle: ideas);
+                },
+              ),
+              const SizedBox(height: 16),
+              FutureBuilder<List<MarketNewsItem>>(
+                future: newsFuture,
+                builder: (context, newsSnapshot) {
+                  final news = newsSnapshot.data ?? const <MarketNewsItem>[];
+                  if (news.isEmpty &&
+                      newsSnapshot.connectionState == ConnectionState.waiting) {
+                    return const Card(
+                      child: Padding(
+                        padding: EdgeInsets.all(16),
+                        child: LinearProgressIndicator(),
+                      ),
+                    );
+                  }
+                  if (news.isEmpty) {
+                    return const SizedBox.shrink();
+                  }
+                  return MarketNewsPanel(
+                    title: 'Market news',
+                    subtitle:
+                        'Live headlines from NGX Pulse so the web and app surfaces stay in step.',
+                    news: news,
+                  );
                 },
               ),
             ],
@@ -5559,6 +5792,8 @@ class PortfolioHoldingDetail extends StatelessWidget {
             final latest = points.isEmpty ? null : points.last;
             final marketSnapshot = detail?.marketSnapshot;
             final news = detail?.news ?? [];
+            final dividends = detail?.dividends ?? [];
+            final disclosures = detail?.disclosures ?? [];
             final loading = snapshot.connectionState == ConnectionState.waiting;
             return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -5598,6 +5833,15 @@ class PortfolioHoldingDetail extends StatelessWidget {
                           points: points,
                           symbolLabel: holding!.symbol,
                         ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  detail?.historySource == 'ngxpulse_history'
+                      ? 'Powered by NGX Pulse historical daily prices and cached inside Stockfolio.'
+                      : 'Chart history is loaded from the available market data feed for this stock.',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
                 ),
                 const SizedBox(height: 16),
                 Wrap(
@@ -5662,6 +5906,34 @@ class PortfolioHoldingDetail extends StatelessWidget {
                 ),
                 const SizedBox(height: 18),
                 Text(
+                  'Dividend history',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 8),
+                if (dividends.isEmpty)
+                  Text(
+                    loading
+                        ? 'Loading dividend history...'
+                        : 'No recent dividend history available.',
+                  )
+                else
+                  ...dividends.map((item) => DividendTile(item: item)),
+                const SizedBox(height: 18),
+                Text(
+                  'Recent disclosures',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 8),
+                if (disclosures.isEmpty)
+                  Text(
+                    loading
+                        ? 'Loading disclosures...'
+                        : 'No recent disclosures available.',
+                  )
+                else
+                  ...disclosures.map((item) => DisclosureTile(item: item)),
+                const SizedBox(height: 18),
+                Text(
                   'Company updates',
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
@@ -5693,35 +5965,295 @@ class CompanyNewsTile extends StatelessWidget {
     final modified = item.modified == null
         ? null
         : DateFormat.yMMMd().format(item.modified!);
+    final metadata = [
+      item.submissionType?.trim(),
+      modified,
+    ].whereType<String>().where((value) => value.isNotEmpty).join(' - ');
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Icon(Icons.description_outlined, size: 18),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  item.title ?? 'Untitled update',
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+      child: InkWell(
+        onTap: item.url == null
+            ? null
+            : () => openExternalUrl(context, item.url!),
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(4),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(Icons.description_outlined, size: 18),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      item.title ?? 'Untitled update',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                        decoration: item.url == null
+                            ? TextDecoration.none
+                            : TextDecoration.underline,
+                      ),
+                    ),
+                    if (metadata.isNotEmpty)
+                      Text(
+                        metadata,
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                  ],
                 ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class DividendTile extends StatelessWidget {
+  const DividendTile({super.key, required this.item});
+
+  final DividendRecord item;
+
+  @override
+  Widget build(BuildContext context) {
+    final exDate = item.exDividendDate == null
+        ? 'TBA'
+        : DateFormat.yMMMd().format(item.exDividendDate!);
+    final payDate = item.payDate == null
+        ? 'TBA'
+        : DateFormat.yMMMd().format(item.payDate!);
+    final amount = item.dividendPerShare == null
+        ? 'Not available'
+        : '${item.currency ?? 'NGN'} ${item.dividendPerShare!.toStringAsFixed(2)}';
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: Theme.of(context).colorScheme.outlineVariant,
+          ),
+        ),
+        child: Wrap(
+          spacing: 12,
+          runSpacing: 8,
+          children: [
+            _MetaPill(icon: Icons.payments_outlined, text: amount),
+            _MetaPill(
+              icon: Icons.event_available_outlined,
+              text: 'Ex-date $exDate',
+            ),
+            _MetaPill(
+              icon: Icons.calendar_month_outlined,
+              text: 'Pay date $payDate',
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class DisclosureTile extends StatelessWidget {
+  const DisclosureTile({super.key, required this.item});
+
+  final DisclosureItem item;
+
+  @override
+  Widget build(BuildContext context) {
+    final published = item.publishedAt == null
+        ? null
+        : DateFormat.yMMMd().format(item.publishedAt!);
+    final subtitle = [
+      item.category,
+      published,
+    ].whereType<String>().where((value) => value.isNotEmpty).join(' - ');
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: InkWell(
+        onTap: item.url == null
+            ? null
+            : () => openExternalUrl(context, item.url!),
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surface,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: Theme.of(context).colorScheme.outlineVariant,
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                item.title ?? 'Untitled disclosure',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  decoration: item.url == null
+                      ? TextDecoration.none
+                      : TextDecoration.underline,
+                ),
+              ),
+              if (subtitle.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(subtitle, style: Theme.of(context).textTheme.bodySmall),
+              ],
+              if ((item.summary ?? '').trim().isNotEmpty) ...[
+                const SizedBox(height: 6),
                 Text(
-                  [item.submissionType?.trim(), modified]
-                      .whereType<String>()
-                      .where((value) => value.isNotEmpty)
-                      .join(' - '),
+                  item.summary!,
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
               ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class MarketNewsPanel extends StatelessWidget {
+  const MarketNewsPanel({
+    super.key,
+    required this.title,
+    required this.subtitle,
+    required this.news,
+  });
+
+  final String title;
+  final String subtitle;
+  final List<MarketNewsItem> news;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              title,
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              subtitle,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 14),
+            ...news.map((item) => MarketNewsTile(item: item)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class MarketNewsTile extends StatelessWidget {
+  const MarketNewsTile({super.key, required this.item});
+
+  final MarketNewsItem item;
+
+  @override
+  Widget build(BuildContext context) {
+    final published = item.publishedAt == null
+        ? null
+        : DateFormat.yMMMd().add_jm().format(item.publishedAt!.toLocal());
+    final sourceLine = [
+      item.source,
+      published,
+    ].whereType<String>().where((value) => value.isNotEmpty).join(' - ');
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: InkWell(
+        onTap: item.url == null
+            ? null
+            : () => openExternalUrl(context, item.url!),
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surface,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: Theme.of(context).colorScheme.outlineVariant,
             ),
           ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                item.title ?? 'Untitled market story',
+                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  decoration: item.url == null
+                      ? TextDecoration.none
+                      : TextDecoration.underline,
+                ),
+              ),
+              if (sourceLine.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(sourceLine, style: Theme.of(context).textTheme.bodySmall),
+              ],
+              if ((item.summary ?? '').trim().isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Text(
+                  item.summary!,
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MetaPill extends StatelessWidget {
+  const _MetaPill({required this.icon, required this.text});
+
+  final IconData icon;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: Theme.of(
+          context,
+        ).colorScheme.surfaceContainerHighest.withValues(alpha: 0.35),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 16, color: Theme.of(context).colorScheme.primary),
+          const SizedBox(width: 6),
+          Text(text, style: Theme.of(context).textTheme.labelMedium),
         ],
       ),
     );
@@ -6042,7 +6574,7 @@ class _ChartsScreenState extends State<ChartsScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              'Daily chart history comes from stored market snapshots. Shorter ranges make intraday-style price patterns easier to inspect, while the 2Y view deepens as more daily data accumulates.',
+              'Daily chart history is pulled from NGX Pulse historical prices and cached by Stockfolio. Shorter ranges make recent price patterns easier to inspect, while the 2Y view deepens as more daily data accumulates.',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),

@@ -4,6 +4,7 @@ from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, Numeric, St
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
+from .settings import get_settings
 
 
 class TimestampMixin:
@@ -60,6 +61,10 @@ class Stock(TimestampMixin, Base):
 
     prices: Mapped[list["StockPrice"]] = relationship(back_populates="stock", cascade="all, delete-orphan")
     holdings: Mapped[list["PortfolioHolding"]] = relationship(back_populates="stock")
+
+    @property
+    def supports_history(self) -> bool:
+        return bool(self.ngx_id) or get_settings().ngxpulse_enabled
 
 
 class StockPrice(TimestampMixin, Base):
