@@ -13,6 +13,7 @@ from .ngx_client import (
     fetch_market_status_from_ngx,
     legacy_seed_stocks,
 )
+from .settings import get_settings
 from .schemas import HoldingUpsert
 
 
@@ -52,7 +53,8 @@ def record_sync_log(
 
 
 def sync_stocks(db: Session, include_history: bool = False) -> tuple[str, int, int, str, str | None]:
-    source = "ngx_doclib"
+    settings = get_settings()
+    source = "ngxpulse" if settings.ngxpulse_enabled else "ngx_doclib"
     try:
         stocks = fetch_all_stocks_from_ngx()
     except NgxFetchError as exc:
@@ -79,7 +81,7 @@ def sync_stocks(db: Session, include_history: bool = False) -> tuple[str, int, i
     history_count = 0
     for stock_data in stocks:
         stock = upsert_stock(db, stock_data)
-        if include_history and stock.ngx_id:
+        if include_history and (settings.ngxpulse_enabled or stock.ngx_id):
             history_count += upsert_stock_history(db, stock.symbol, stock.ngx_id)
         history_count += upsert_daily_stock_snapshot(db, stock)
 
@@ -164,13 +166,14 @@ def get_cached_market_status(db: Session) -> dict:
 
 
 def upsert_stock_history(db: Session, symbol: str, ngx_id: str) -> int:
+    source = "ngxpulse_history" if get_settings().ngxpulse_enabled else "ngx_chart"
     try:
-        rows = fetch_historical_prices_cached(ngx_id)
+        rows = fetch_historical_prices_cached(symbol, ngx_id)
     except NgxFetchError as exc:
         record_sync_log(
             db,
             status="warning",
-            source="ngx_chart",
+            source=source,
             message=f"{STALE_DATA_MESSAGE} {exc}",
         )
         return 0

@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from functools import lru_cache
 from html import unescape
 import re
@@ -72,6 +72,18 @@ def _number(value: Any) -> float | None:
         return None
 
 
+def _ngxpulse_headers() -> dict[str, str]:
+    settings = get_settings()
+    api_key = (settings.ngxpulse_api_key or "").strip()
+    if not api_key:
+        raise NgxFetchError("NGX Pulse API key is not configured.")
+    return {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "X-API-Key": api_key,
+    }
+
+
 def _first(item: dict[str, Any], keys: list[str]) -> Any:
     lowered = {str(key).lower(): value for key, value in item.items()}
     for key in keys:
@@ -88,12 +100,28 @@ def normalize_stock(raw: dict[str, Any], source: str) -> dict[str, Any] | None:
         return None
 
     symbol_text = str(symbol).strip().upper()
-    last_price = _number(_first(raw, ["Value", "last_price", "lastPrice", "price", "currentPrice", "close", "Close"]))
+    last_price = _number(
+        _first(
+            raw,
+            [
+                "Value",
+                "last_price",
+                "lastPrice",
+                "price",
+                "currentPrice",
+                "current_price",
+                "close",
+                "Close",
+            ],
+        )
+    )
     previous_close = _number(_first(raw, ["previous_close", "previousClose", "pclose", "prevClose"]))
     raw_price_move = _number(
         _first(raw, ["Change", "change", "PercChange", "percent_change", "changePercent", "percentageChange", "Change %"])
     )
     open_price = _number(_first(raw, ["Open", "open", "open_price"]))
+    if previous_close in (None, 0) and last_price not in (None, 0) and raw_price_move is not None:
+        previous_close = last_price / (1 + (raw_price_move / 100)) if raw_price_move != -100 else None
     if open_price in (None, 0) and last_price is not None and raw_price_move is not None:
         derived_open = last_price - raw_price_move
         if derived_open > 0:
@@ -134,7 +162,14 @@ def normalize_stock(raw: dict[str, Any], source: str) -> dict[str, Any] | None:
         "high_price": high_price,
         "low_price": low_price,
         "volume": _number(_first(raw, ["Volume", "volume"])),
-        "market_cap": _number(_first(raw, ["MarketCap", "market_cap", "marketCap", "Mkt Cap"])),
+        "market_cap": (
+            _number(_first(raw, ["MarketCap", "market_cap", "marketCap", "Mkt Cap"]))
+            or (
+                (_number(_first(raw, ["shares_outstanding", "sharesOutstanding"])) or 0) * last_price
+                if last_price is not None
+                else None
+            )
+        ),
         "change": computed_change if computed_change is not None else raw_price_move,
         "percent_change": (
             computed_percent_change
@@ -148,6 +183,27 @@ def normalize_stock(raw: dict[str, Any], source: str) -> dict[str, Any] | None:
 
 def fetch_all_stocks_from_ngx() -> list[dict[str, Any]]:
     settings = get_settings()
+    if settings.ngxpulse_enabled:
+        try:
+            response = _get_session().get(
+                f"{settings.ngxpulse_base_url}/api/ngxdata/stocks",
+                headers=_ngxpulse_headers(),
+                timeout=20,
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except requests.RequestException as exc:
+            raise NgxFetchError(f"NGX Pulse stocks request failed: {exc}") from exc
+        except ValueError as exc:
+            raise NgxFetchError(f"NGX Pulse stocks response was not valid JSON: {exc}") from exc
+        if not isinstance(payload, list):
+            raise NgxFetchError("NGX Pulse stocks response was not a list of equities.")
+        return [
+            stock
+            for item in payload
+            if isinstance(item, dict) and (stock := normalize_stock(item, "ngxpulse"))
+        ]
+
     try:
         response = _get_session().get(
             settings.ngx_ticker_url,
@@ -174,12 +230,61 @@ def fetch_all_stocks_from_ngx_cached() -> list[dict[str, Any]]:
     return fetch_all_stocks_from_ngx()
 
 
-def fetch_historical_prices(ngx_id: str) -> list[dict[str, Any]]:
+def fetch_historical_prices(symbol: str, ngx_id: str | None = None) -> list[dict[str, Any]]:
+    settings = get_settings()
+    normalized_symbol = symbol.strip().upper()
+    if settings.ngxpulse_enabled:
+        today = date.today()
+        from_date = today - timedelta(days=365 * 5)
+        try:
+            response = _get_session().get(
+                f"{settings.ngxpulse_base_url}/api/ngxdata/prices/{normalized_symbol}",
+                params={
+                    "from": from_date.isoformat(),
+                    "to": today.isoformat(),
+                },
+                headers=_ngxpulse_headers(),
+                timeout=20,
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except requests.RequestException as exc:
+            raise NgxFetchError(f"NGX Pulse historical prices request failed for {normalized_symbol}: {exc}") from exc
+        except ValueError as exc:
+            raise NgxFetchError(f"NGX Pulse historical prices response was not valid JSON for {normalized_symbol}: {exc}") from exc
+
+        prices = payload.get("prices") if isinstance(payload, dict) else None
+        if not isinstance(prices, list):
+            raise NgxFetchError(f"NGX Pulse historical prices response was not a prices list for {normalized_symbol}.")
+
+        rows: list[dict[str, Any]] = []
+        for item in prices:
+            if not isinstance(item, dict):
+                continue
+            trade_date = item.get("trade_date")
+            if not trade_date:
+                continue
+            try:
+                parsed_date = date.fromisoformat(str(trade_date))
+            except ValueError:
+                continue
+            rows.append(
+                {
+                    "trade_date": parsed_date,
+                    "open_price": _number(item.get("open_price")) or _number(item.get("close_price")),
+                    "high_price": _number(item.get("high_price")),
+                    "low_price": _number(item.get("low_price")),
+                    "close_price": _number(item.get("close_price")),
+                    "volume": _number(item.get("volume")),
+                }
+            )
+        return [row for row in rows if row.get("close_price") is not None]
+
     if not ngx_id:
         return []
 
     try:
-        response = _get_session().get(f"{get_settings().ngx_chart_base_url}{ngx_id}", timeout=20)
+        response = _get_session().get(f"{settings.ngx_chart_base_url}{ngx_id}", timeout=20)
         response.raise_for_status()
         payload = response.json()
     except requests.RequestException as exc:
@@ -205,6 +310,8 @@ def fetch_historical_prices(ngx_id: str) -> list[dict[str, Any]]:
             {
                 "trade_date": trade_date,
                 "open_price": previous_close if previous_close is not None else close_price,
+                "high_price": close_price,
+                "low_price": close_price,
                 "close_price": close_price,
             }
         )
@@ -294,9 +401,29 @@ def fetch_stock_logo(symbol: str) -> tuple[bytes, str] | None:
 
 
 def fetch_market_status_from_ngx() -> tuple[str, Any]:
+    settings = get_settings()
+    if settings.ngxpulse_enabled:
+        try:
+            response = _get_session().get(
+                f"{settings.ngxpulse_base_url}/api/ngxdata/market-status",
+                headers=_ngxpulse_headers(),
+                timeout=10,
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except requests.RequestException as exc:
+            raise NgxFetchError(f"NGX Pulse market status request failed: {exc}") from exc
+        except ValueError as exc:
+            raise NgxFetchError(f"NGX Pulse market status response was not valid JSON: {exc}") from exc
+        if not isinstance(payload, dict):
+            raise NgxFetchError("NGX Pulse market status response was not an object.")
+        raw_status = str(payload.get("status") or "unknown").strip().lower()
+        status = "OPEN" if raw_status == "open" else "CLOSED"
+        return status, payload
+
     try:
         response = _get_session().get(
-            get_settings().market_status_url,
+            settings.market_status_url,
             headers={"Accept": "application/json"},
             timeout=10,
         )
@@ -318,9 +445,37 @@ def fetch_market_status_from_ngx() -> tuple[str, Any]:
 
 
 def fetch_market_snapshot_from_ngx() -> dict[str, Any]:
+    settings = get_settings()
+    if settings.ngxpulse_enabled:
+        try:
+            response = _get_session().get(
+                f"{settings.ngxpulse_base_url}/api/ngxdata/market",
+                headers=_ngxpulse_headers(),
+                timeout=10,
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except requests.RequestException as exc:
+            raise NgxFetchError(f"NGX Pulse market overview request failed: {exc}") from exc
+        except ValueError as exc:
+            raise NgxFetchError(f"NGX Pulse market overview response was not valid JSON: {exc}") from exc
+        if not isinstance(payload, dict):
+            raise NgxFetchError("NGX Pulse market overview response was not an object.")
+
+        return {
+            "asi": _number(payload.get("asi")),
+            "deals": _number(payload.get("deals")),
+            "volume": _number(payload.get("volume")),
+            "value": _number(payload.get("value")),
+            "market_cap": _number(payload.get("market_cap")),
+            "bond_cap": _number(payload.get("bond_cap")),
+            "etf_cap": _number(payload.get("etf_cap")),
+            "source": "ngxpulse_market",
+        }
+
     try:
         response = _get_session().get(
-            get_settings().market_snapshot_url,
+            settings.market_snapshot_url,
             headers={
                 "Accept": "application/json;odata=verbose",
                 "Content-Type": "application/json;odata=verbose",
@@ -415,8 +570,11 @@ def fetch_company_news_cached(ngx_id: str) -> list[dict[str, Any]]:
 
 
 @_ttl_cache(ttl_seconds=900)
-def fetch_historical_prices_cached(ngx_id: str) -> list[dict[str, Any]]:
-    return fetch_historical_prices(ngx_id)
+def fetch_historical_prices_cached(
+    symbol: str,
+    ngx_id: str | None = None,
+) -> list[dict[str, Any]]:
+    return fetch_historical_prices(symbol, ngx_id)
 
 
 def legacy_seed_stocks() -> list[dict[str, Any]]:

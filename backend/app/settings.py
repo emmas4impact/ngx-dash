@@ -15,6 +15,8 @@ class Settings(BaseSettings):
         validation_alias="CORS_ORIGINS",
     )
     admin_emails: str = Field(default="", validation_alias="ADMIN_EMAILS")
+    ngxpulse_base_url: str = Field(default="https://www.ngxpulse.ng", validation_alias="NGXPULSE_BASE_URL")
+    ngxpulse_api_key: str | None = Field(default=None, validation_alias="NGXPULSE_API_KEY")
 
     ngx_ticker_url: str = Field(
         default="https://doclib.ngxgroup.com/REST/api/statistics/ticker",
@@ -102,6 +104,10 @@ class Settings(BaseSettings):
     @property
     def push_enabled(self) -> bool:
         return bool(self.firebase_project_id and (self.firebase_service_account_json or self.firebase_service_account_file))
+
+    @property
+    def ngxpulse_enabled(self) -> bool:
+        return bool(self.ngxpulse_api_key and self.ngxpulse_api_key.strip())
 
 
 @lru_cache

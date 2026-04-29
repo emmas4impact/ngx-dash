@@ -119,7 +119,37 @@ MarketStatusPalette marketStatusPalette(
             icon: Icons.lock_clock_outlined,
           );
   }
+  if (normalized == 'CLOSED') {
+    return theme.brightness == Brightness.dark
+        ? const MarketStatusPalette(
+            base: Color(0xFFF87171),
+            container: Color(0xFF32161A),
+            content: Color(0xFFFECACA),
+            icon: Icons.lock_clock_outlined,
+          )
+        : const MarketStatusPalette(
+            base: Color(0xFFDC2626),
+            container: Color(0xFFFEE2E2),
+            content: Color(0xFF991B1B),
+            icon: Icons.lock_clock_outlined,
+          );
+  }
   if (normalized.contains('START_INDEX')) {
+    return theme.brightness == Brightness.dark
+        ? const MarketStatusPalette(
+            base: Color(0xFF34D399),
+            container: Color(0xFF0F2A24),
+            content: Color(0xFFD1FAE5),
+            icon: Icons.trending_up_rounded,
+          )
+        : const MarketStatusPalette(
+            base: Color(0xFF059669),
+            container: Color(0xFFD1FAE5),
+            content: Color(0xFF065F46),
+            icon: Icons.trending_up_rounded,
+          );
+  }
+  if (normalized == 'OPEN') {
     return theme.brightness == Brightness.dark
         ? const MarketStatusPalette(
             base: Color(0xFF34D399),
