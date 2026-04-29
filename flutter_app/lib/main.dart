@@ -4564,32 +4564,6 @@ class _AccountScreenState extends State<AccountScreen> {
     }
   }
 
-  Future<void> backfillHistory() async {
-    setState(() => backfillingHistory = true);
-    try {
-      final message = await widget.api.syncStocks(includeHistory: true);
-      refresh();
-      if (mounted) showMessage(context, message);
-    } catch (error) {
-      if (mounted) showError(context, error.toString());
-    } finally {
-      if (mounted) setState(() => backfillingHistory = false);
-    }
-  }
-
-  Future<void> sendTestPush() async {
-    setState(() => sendingTestPush = true);
-    try {
-      final message = await widget.api.sendTestPush();
-      refresh();
-      if (mounted) showMessage(context, message);
-    } catch (error) {
-      if (mounted) showError(context, error.toString());
-    } finally {
-      if (mounted) setState(() => sendingTestPush = false);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<AppUser>(
