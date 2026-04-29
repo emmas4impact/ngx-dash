@@ -27,7 +27,7 @@ from .ngx_client import (
     fetch_market_snapshot_from_ngx,
     fetch_stock_logo,
 )
-from .push import PushDeliveryError, dispatch_portfolio_price_alerts, remove_push_token, send_push_message, upsert_push_token
+from .push import PushDeliveryError, dispatch_market_price_alerts, remove_push_token, send_push_message, upsert_push_token
 from .schemas import (
     AccountDeleteRequest,
     AccountDeletionRequestCreate,
@@ -332,11 +332,12 @@ async def background_stock_sync_loop() -> None:
             await asyncio.to_thread(sync_stocks, db, False)
             await asyncio.to_thread(refresh_market_status, db)
             if settings.push_enabled:
-                result = await asyncio.to_thread(dispatch_portfolio_price_alerts, db, settings)
-                if result["alerts_sent"]:
+                result = await asyncio.to_thread(dispatch_market_price_alerts, db, settings)
+                if result["market_open_alerts_sent"] or result["stock_alerts_sent"]:
                     logger.info(
-                        "Sent %s portfolio push alerts to %s device tokens",
-                        result["alerts_sent"],
+                        "Sent %s market-open alerts and %s stock alerts to %s device tokens",
+                        result["market_open_alerts_sent"],
+                        result["stock_alerts_sent"],
                         result["tokens_sent"],
                     )
         except asyncio.CancelledError:

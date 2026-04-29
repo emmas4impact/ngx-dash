@@ -10,6 +10,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'app_version.dart';
 import 'config.dart';
@@ -208,6 +209,33 @@ String chartAxisLabel(double value) {
     return NumberFormat('#,##0').format(value);
   }
   return NumberFormat('#,##0.##').format(value);
+}
+
+DateTime currentWatTime() =>
+    DateTime.now().toUtc().add(const Duration(hours: 1));
+
+bool isMarketHoursWat(DateTime moment) {
+  if (moment.weekday == DateTime.saturday ||
+      moment.weekday == DateTime.sunday) {
+    return false;
+  }
+  final minutes = (moment.hour * 60) + moment.minute;
+  return minutes >= (9 * 60) && minutes < (16 * 60);
+}
+
+bool isSameWatDate(DateTime a, DateTime b) =>
+    a.year == b.year && a.month == b.month && a.day == b.day;
+
+Future<void> openExternalUrl(BuildContext context, String url) async {
+  final uri = Uri.tryParse(url.trim());
+  if (uri == null) {
+    showError(context, 'Could not open link: $url');
+    return;
+  }
+  final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+  if (!launched && context.mounted) {
+    showError(context, 'Could not open link: $url');
+  }
 }
 
 String normalizeApiBaseUrl(String value) {
@@ -3524,6 +3552,79 @@ class _DashboardShellState extends State<DashboardShell> {
     setState(() => index = nextIndex);
   }
 
+  Future<void> _showAboutScreen() async {
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => const LegalDocumentScreen(
+          title: 'About Stockfolio NG',
+          sections: [
+            LegalSection(
+              heading: 'What it does',
+              body:
+                  'Stockfolio NG helps you follow Nigerian equities with daily charts, market leaders, portfolio tracking, and push alerts for major market moves.',
+            ),
+            LegalSection(
+              heading: 'How market data is used',
+              body:
+                  'The app combines NGX market snapshots, stored daily price history, and company information to show price patterns, opening-versus-current movement, and account-level portfolio views.',
+            ),
+            LegalSection(
+              heading: 'Why alerts matter',
+              body:
+                  'Push alerts are designed to highlight market-open activity and notable stock moves quickly so users can return to the app and inspect charts, watchlists, and stock detail screens.',
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showFaqScreen() async {
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => LegalDocumentScreen(
+          title: 'FAQ',
+          sections: [
+            const LegalSection(
+              heading: 'Why do some charts show 1M, 3M, 6M, 1Y, and 2Y?',
+              body:
+                  'Those ranges let you inspect shorter daily price patterns quickly while still keeping longer trend views available from the same chart screen.',
+            ),
+            const LegalSection(
+              heading:
+                  'What is the difference between current price and closing price?',
+              body:
+                  'During market hours in West Africa Time, charts show opening price and current price. After the market closes, the current field becomes the closing price for that trading day.',
+            ),
+            const LegalSection(
+              heading: 'Why do push alerts mention stocks I do not hold?',
+              body:
+                  'Market-wide alerts are intended to surface notable movers across the exchange so users can return to the app and inspect opportunities outside their current portfolio.',
+            ),
+            LegalSection(
+              heading:
+                  'Where can I read the privacy policy or request account deletion?',
+              body:
+                  'Use the in-app legal screens or open the public pages directly from the policy and deletion sections.',
+            ),
+          ],
+          footerLinks: [
+            LegalLinkItem(
+              label: 'Privacy policy',
+              url: widget.api.privacyPolicyUrl,
+            ),
+            LegalLinkItem(
+              label: 'Account deletion',
+              url: widget.api.accountDeletionUrl,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -3630,6 +3731,8 @@ class _DashboardShellState extends State<DashboardShell> {
             themeMode: widget.themeMode,
             onThemeSelected: widget.onThemeModeChanged,
             onOpenProfile: () => setState(() => index = 4),
+            onOpenAbout: _showAboutScreen,
+            onOpenFaq: _showFaqScreen,
             onSignOut: widget.onSignOut,
           ),
           appBar: AppBar(
@@ -3832,6 +3935,8 @@ class DashboardSideDrawer extends StatelessWidget {
     required this.themeMode,
     required this.onThemeSelected,
     required this.onOpenProfile,
+    required this.onOpenAbout,
+    required this.onOpenFaq,
     required this.onSignOut,
   });
 
@@ -3840,6 +3945,8 @@ class DashboardSideDrawer extends StatelessWidget {
   final ThemeMode themeMode;
   final ValueChanged<ThemeMode> onThemeSelected;
   final VoidCallback onOpenProfile;
+  final VoidCallback onOpenAbout;
+  final VoidCallback onOpenFaq;
   final Future<void> Function() onSignOut;
 
   @override
@@ -3943,11 +4050,37 @@ class DashboardSideDrawer extends StatelessWidget {
                     const Divider(height: 1),
                     ListTile(
                       leading: const Icon(Icons.info_outline),
+                      title: const Text('About'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () {
+                        Navigator.of(context).maybePop();
+                        onOpenAbout();
+                      },
+                    ),
+                    const Divider(height: 1),
+                    ListTile(
+                      leading: const Icon(Icons.quiz_outlined),
+                      title: const Text('FAQ'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () {
+                        Navigator.of(context).maybePop();
+                        onOpenFaq();
+                      },
+                    ),
+                    const Divider(height: 1),
+                    ListTile(
+                      leading: const Icon(Icons.info_outline),
                       title: const Text('App version'),
-                      trailing: VersionLabel(
-                        packageInfoFuture: packageInfoFuture,
-                        centered: false,
-                        compact: true,
+                      subtitle: Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: VersionLabel(
+                            packageInfoFuture: packageInfoFuture,
+                            centered: false,
+                            compact: true,
+                          ),
+                        ),
                       ),
                     ),
                     const Divider(height: 1),
@@ -4514,8 +4647,16 @@ class _AccountScreenState extends State<AccountScreen> {
                   'You can delete your account inside the app. That removes the account and associated portfolio records, except where data must be retained for security, fraud prevention, or legal compliance.',
             ),
           ],
-          footerText:
-              'Public policy URL: ${widget.api.privacyPolicyUrl}\nAccount deletion page: ${widget.api.accountDeletionUrl}',
+          footerLinks: [
+            LegalLinkItem(
+              label: 'Open privacy policy',
+              url: widget.api.privacyPolicyUrl,
+            ),
+            LegalLinkItem(
+              label: 'Open account deletion page',
+              url: widget.api.accountDeletionUrl,
+            ),
+          ],
         ),
       ),
     );
@@ -4538,7 +4679,16 @@ class _AccountScreenState extends State<AccountScreen> {
                   'If you cannot access the app, use the public account deletion page to submit a deletion request with your account email address.',
             ),
           ],
-          footerText: 'Public deletion URL: ${widget.api.accountDeletionUrl}',
+          footerLinks: [
+            LegalLinkItem(
+              label: 'Open account deletion page',
+              url: widget.api.accountDeletionUrl,
+            ),
+            LegalLinkItem(
+              label: 'Open privacy policy',
+              url: widget.api.privacyPolicyUrl,
+            ),
+          ],
         ),
       ),
     );
@@ -6495,17 +6645,26 @@ class LegalSection {
   final String body;
 }
 
+class LegalLinkItem {
+  const LegalLinkItem({required this.label, required this.url});
+
+  final String label;
+  final String url;
+}
+
 class LegalDocumentScreen extends StatelessWidget {
   const LegalDocumentScreen({
     super.key,
     required this.title,
     required this.sections,
     this.footerText,
+    this.footerLinks = const [],
   });
 
   final String title;
   final List<LegalSection> sections;
   final String? footerText;
+  final List<LegalLinkItem> footerLinks;
 
   @override
   Widget build(BuildContext context) {
@@ -6531,6 +6690,22 @@ class LegalDocumentScreen extends StatelessWidget {
                   ],
                   if (footerText != null && footerText!.isNotEmpty)
                     SelectableText(footerText!),
+                  if (footerLinks.isNotEmpty) ...[
+                    if (footerText != null && footerText!.isNotEmpty)
+                      const SizedBox(height: 16),
+                    for (final link in footerLinks)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: TextButton.icon(
+                            onPressed: () => openExternalUrl(context, link.url),
+                            icon: const Icon(Icons.open_in_new),
+                            label: Text(link.label),
+                          ),
+                        ),
+                      ),
+                  ],
                 ],
               ),
             ),
@@ -7963,6 +8138,10 @@ class PriceChart extends StatelessWidget {
         rangeLabel == '1Y' ||
         rangeLabel == '2Y' ||
         latest.date.year != earliest.date.year;
+    final watNow = currentWatTime();
+    final latestWatDate = latest.date.toUtc().add(const Duration(hours: 1));
+    final useCurrentPriceLabel =
+        isMarketHoursWat(watNow) && isSameWatDate(latestWatDate, watNow);
     final dateRangeLabel =
         '${DateFormat.MMMd().format(earliest.date)} - ${DateFormat.MMMd().format(latest.date)}';
     final bottomInterval = max(1, (points.length / 4).ceil()).toDouble();
@@ -8004,19 +8183,29 @@ class PriceChart extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 8),
-        Wrap(
-          alignment: WrapAlignment.end,
-          spacing: 14,
-          runSpacing: 8,
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             ChartLegendDot(
               color: secondary,
               label: 'Opening price: ${moneyFormat.format(latest.open)}',
             ),
+            const SizedBox(height: 8),
             ChartLegendDot(
               color: primary,
-              label: 'Closing price: ${moneyFormat.format(latest.close)}',
+              label: useCurrentPriceLabel
+                  ? 'Current price: ${moneyFormat.format(latest.close)}'
+                  : 'Closing price: ${moneyFormat.format(latest.close)}',
             ),
+            if (useCurrentPriceLabel) ...[
+              const SizedBox(height: 8),
+              ChartLegendDot(
+                color: theme.colorScheme.onSurfaceVariant.withValues(
+                  alpha: 0.6,
+                ),
+                label: 'Closing price: -',
+              ),
+            ],
           ],
         ),
         const SizedBox(height: 10),
@@ -8124,15 +8313,17 @@ class ChartLegendDot extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Row(
-      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         Container(
-          width: 10,
-          height: 10,
+          width: 12,
+          height: 12,
           decoration: BoxDecoration(color: color, shape: BoxShape.circle),
         ),
-        const SizedBox(width: 6),
-        Text(label),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(label, style: Theme.of(context).textTheme.bodyMedium),
+        ),
       ],
     );
   }
