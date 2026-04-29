@@ -167,6 +167,49 @@ Color chartGridColor(ThemeData theme) => theme.brightness == Brightness.dark
     ? Colors.white.withValues(alpha: 0.09)
     : theme.colorScheme.outlineVariant.withValues(alpha: 0.55);
 
+class ChartAxisScale {
+  const ChartAxisScale({required this.maxY, required this.interval});
+
+  final double maxY;
+  final double interval;
+}
+
+ChartAxisScale chartAxisScaleFromZero(
+  Iterable<double> values, {
+  int targetTicks = 4,
+}) {
+  final positiveValues = values.where((value) => value.isFinite && value > 0);
+  if (positiveValues.isEmpty) {
+    return const ChartAxisScale(maxY: 4, interval: 1);
+  }
+
+  final highest = positiveValues.reduce(max);
+  final roughInterval = highest / targetTicks;
+  final exponent = pow(10, (log(roughInterval) / ln10).floor()).toDouble();
+  final normalized = roughInterval / exponent;
+  final niceBase = normalized <= 1
+      ? 1.0
+      : normalized <= 2
+      ? 2.0
+      : normalized <= 5
+      ? 5.0
+      : 10.0;
+  final interval = niceBase * exponent;
+  final maxY = max(
+    interval * targetTicks,
+    (highest / interval).ceilToDouble() * interval,
+  );
+  return ChartAxisScale(maxY: maxY, interval: interval);
+}
+
+String chartAxisLabel(double value) {
+  if (value == 0) return '0';
+  if (value >= 10 || value == value.roundToDouble()) {
+    return NumberFormat('#,##0').format(value);
+  }
+  return NumberFormat('#,##0.##').format(value);
+}
+
 String normalizeApiBaseUrl(String value) {
   final trimmed = value.trim().replaceAll(RegExp(r'/+$'), '');
   if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
@@ -2457,9 +2500,7 @@ class _LandingPulseChart extends StatelessWidget {
       );
     }
 
-    final minY = allY.reduce(min);
-    final maxY = allY.reduce(max);
-    final padding = max(0.5, (maxY - minY) * 0.16);
+    final axisScale = chartAxisScaleFromZero(allY);
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -2467,15 +2508,6 @@ class _LandingPulseChart extends StatelessWidget {
         final labels = compact
             ? {0: 'Open', 9: 'Now'}
             : {0: 'Open', 4: 'Noon', 9: 'Now'};
-        String axisLabel(double value) {
-          if (value >= 1000) {
-            return '₦${compactFormat.format(value)}';
-          }
-          return value >= 10
-              ? '₦${value.toStringAsFixed(0)}'
-              : '₦${value.toStringAsFixed(2)}';
-        }
-
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -2499,13 +2531,16 @@ class _LandingPulseChart extends StatelessWidget {
                 LineChartData(
                   minX: 0,
                   maxX: 9,
-                  minY: minY - padding,
-                  maxY: maxY + padding,
+                  minY: 0,
+                  maxY: axisScale.maxY,
                   borderData: FlBorderData(show: false),
                   gridData: FlGridData(
                     show: true,
-                    drawVerticalLine: false,
+                    drawVerticalLine: true,
+                    verticalInterval: compact ? 3 : 2,
                     getDrawingHorizontalLine: (_) =>
+                        FlLine(color: chartGridColor(theme), strokeWidth: 1),
+                    getDrawingVerticalLine: (_) =>
                         FlLine(color: chartGridColor(theme), strokeWidth: 1),
                   ),
                   titlesData: FlTitlesData(
@@ -2541,11 +2576,11 @@ class _LandingPulseChart extends StatelessWidget {
                       sideTitles: SideTitles(
                         showTitles: true,
                         reservedSize: compact ? 44 : 52,
-                        interval: max(1.0, (maxY - minY) / 3),
+                        interval: axisScale.interval,
                         getTitlesWidget: (value, meta) => Padding(
                           padding: const EdgeInsets.only(right: 8),
                           child: Text(
-                            axisLabel(value),
+                            chartAxisLabel(value),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: theme.textTheme.labelSmall?.copyWith(
@@ -3052,7 +3087,10 @@ class LandingStockDetailSheet extends StatelessWidget {
                             icon: Icons.show_chart,
                             text: 'No chart data available yet.',
                           )
-                        : PriceChart(points: points),
+                        : PriceChart(
+                            points: points,
+                            symbolLabel: resolvedStock.symbol,
+                          ),
                   ),
                   const SizedBox(height: 16),
                   Wrap(
@@ -3168,6 +3206,7 @@ class _DashboardShellState extends State<DashboardShell> {
   DateTime? webSessionDeadline;
   bool webSessionExtended = false;
   bool sessionPromptOpen = false;
+  bool webSessionEnding = false;
   bool hideFinancialValues = false;
 
   @override
@@ -3250,33 +3289,15 @@ class _DashboardShellState extends State<DashboardShell> {
     if (!mounted ||
         !kIsWeb ||
         webSessionDeadline == null ||
-        sessionPromptOpen) {
+        sessionPromptOpen ||
+        webSessionEnding) {
       return;
     }
     final remaining = webSessionDeadline!.difference(DateTime.now());
     if (remaining.isNegative || remaining.inSeconds == 0) {
       if (!webSessionExtended) {
         sessionPromptOpen = true;
-        final extend = await showDialog<bool>(
-          context: context,
-          barrierDismissible: false,
-          builder: (context) => AlertDialog(
-            title: const Text('Session expired'),
-            content: const Text(
-              'Your web session has reached 1 hour. Extend it once for another 30 minutes?',
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(false),
-                child: const Text('Log out'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.of(context).pop(true),
-                child: const Text('Extend 30 mins'),
-              ),
-            ],
-          ),
-        );
+        final extend = await _promptWebSessionExtension();
         sessionPromptOpen = false;
         if (extend == true) {
           final prefs = await SharedPreferences.getInstance();
@@ -3295,14 +3316,81 @@ class _DashboardShellState extends State<DashboardShell> {
           return;
         }
       }
-      if (!mounted) return;
-      showMessage(context, 'Your web session has ended. Please sign in again.');
-      await widget.onSignOut();
+      await _endExpiredWebSession();
       return;
     }
     if (mounted) {
       setState(() {});
     }
+  }
+
+  Future<bool?> _promptWebSessionExtension() async {
+    var secondsLeft = 5;
+    var dialogOpen = true;
+    BuildContext? dialogContext;
+    late void Function(VoidCallback fn) setDialogState;
+    final timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!dialogOpen) {
+        timer.cancel();
+        return;
+      }
+      secondsLeft -= 1;
+      if (secondsLeft <= 0) {
+        timer.cancel();
+        if (dialogContext != null && Navigator.of(dialogContext!).canPop()) {
+          Navigator.of(dialogContext!).pop(false);
+        }
+        return;
+      }
+      if (dialogContext != null) {
+        setDialogState(() {});
+      }
+    });
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        dialogContext = context;
+        return StatefulBuilder(
+          builder: (context, setState) {
+            setDialogState = setState;
+            return AlertDialog(
+              title: const Text('Session expired'),
+              content: Text(
+                'Your web session has reached 1 hour. Extend it once for another 30 minutes?\n\nAuto sign out in ${secondsLeft}s.',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(false),
+                  child: const Text('Log out'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.of(context).pop(true),
+                  child: const Text('Extend 30 mins'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    dialogOpen = false;
+    timer.cancel();
+    return result;
+  }
+
+  Future<void> _endExpiredWebSession() async {
+    if (!mounted || webSessionEnding) return;
+    webSessionEnding = true;
+    if (mounted) {
+      setState(() {
+        sessionPromptOpen = false;
+        webSessionDeadline = null;
+      });
+    }
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    showMessage(context, 'Your web session has ended. Please sign in again.');
+    await widget.onSignOut();
   }
 
   String? get sessionCountdownLabel {
@@ -5352,7 +5440,10 @@ class PortfolioHoldingDetail extends StatelessWidget {
                           icon: Icons.show_chart,
                           text: 'No chart data available yet.',
                         )
-                      : PriceChart(points: points),
+                      : PriceChart(
+                          points: points,
+                          symbolLabel: holding!.symbol,
+                        ),
                 ),
                 const SizedBox(height: 16),
                 Wrap(
@@ -5675,12 +5766,12 @@ class ChartsScreen extends StatefulWidget {
 }
 
 class _ChartsScreenState extends State<ChartsScreen> {
-  static const List<int> rangeOptionsMonths = [3, 6, 12, 24];
+  static const List<int> rangeOptionsMonths = [1, 3, 6, 12, 24];
 
   late Future<List<Stock>> stocksFuture = widget.api.stocks();
   Future<List<PricePoint>>? historyFuture;
   String? selectedSymbol;
-  int selectedRangeMonths = 12;
+  int selectedRangeMonths = 1;
 
   void selectStock(String? symbol) {
     setState(() {
@@ -5703,6 +5794,8 @@ class _ChartsScreenState extends State<ChartsScreen> {
 
   String rangeLabel(int months) {
     switch (months) {
+      case 1:
+        return '1M';
       case 3:
         return '3M';
       case 6:
@@ -5764,6 +5857,22 @@ class _ChartsScreenState extends State<ChartsScreen> {
               onChanged: selectStock,
             ),
             const SizedBox(height: 16),
+            Text(
+              selectedSymbol == null
+                  ? 'Daily chart'
+                  : '$selectedSymbol daily chart',
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Daily open and close history to monitor price patterns over shorter and longer windows.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 12),
             Wrap(
               spacing: 8,
               runSpacing: 8,
@@ -5779,7 +5888,7 @@ class _ChartsScreenState extends State<ChartsScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              'NGX public history currently backfills about 1 year. The 2Y view will deepen automatically as daily snapshots continue to accumulate in your database.',
+              'Daily chart history comes from stored market snapshots. Shorter ranges make intraday-style price patterns easier to inspect, while the 2Y view deepens as more daily data accumulates.',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
@@ -5818,6 +5927,7 @@ class _ChartsScreenState extends State<ChartsScreen> {
                                 '$_historySelectionKey-${points.length}-${points.first.date.toIso8601String()}-${points.last.date.toIso8601String()}',
                               ),
                               points: points,
+                              symbolLabel: selectedSymbol,
                               rangeLabel: rangeLabel(selectedRangeMonths),
                             );
                           },
@@ -7852,10 +7962,16 @@ class StockTile extends StatelessWidget {
 }
 
 class PriceChart extends StatelessWidget {
-  const PriceChart({super.key, required this.points, this.rangeLabel});
+  const PriceChart({
+    super.key,
+    required this.points,
+    this.rangeLabel,
+    this.symbolLabel,
+  });
 
   final List<PricePoint> points;
   final String? rangeLabel;
+  final String? symbolLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -7864,9 +7980,7 @@ class PriceChart extends StatelessWidget {
       ...points.map((point) => point.open),
       ...points.map((point) => point.close),
     ];
-    final minPrice = values.reduce(min);
-    final maxPrice = values.reduce(max);
-    final yPadding = max(1.0, (maxPrice - minPrice) * 0.12);
+    final axisScale = chartAxisScaleFromZero(values);
     final primary = Theme.of(context).colorScheme.primary;
     final secondary = Theme.of(context).colorScheme.tertiary;
     final latest = points.last;
@@ -7877,6 +7991,7 @@ class PriceChart extends StatelessWidget {
         latest.date.year != earliest.date.year;
     final dateRangeLabel =
         '${DateFormat.MMMd().format(earliest.date)} - ${DateFormat.MMMd().format(latest.date)}';
+    final bottomInterval = max(1, (points.length / 4).ceil()).toDouble();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -7886,13 +8001,26 @@ class PriceChart extends StatelessWidget {
           runSpacing: 6,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
+            if (symbolLabel != null && symbolLabel!.trim().isNotEmpty)
+              Text(
+                symbolLabel!,
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
             if (rangeLabel != null)
               Text(
-                '$rangeLabel view',
+                '$rangeLabel daily view',
                 style: theme.textTheme.labelLarge?.copyWith(
                   fontWeight: FontWeight.w700,
                 ),
               ),
+            Text(
+              '${points.length} trading days',
+              style: theme.textTheme.labelMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
             Text(
               dateRangeLabel,
               style: theme.textTheme.labelMedium?.copyWith(
@@ -7921,13 +8049,16 @@ class PriceChart extends StatelessWidget {
         Expanded(
           child: LineChart(
             LineChartData(
-              minY: minPrice - yPadding,
-              maxY: maxPrice + yPadding,
+              minY: 0,
+              maxY: axisScale.maxY,
               gridData: FlGridData(
                 show: true,
-                drawVerticalLine: false,
+                drawVerticalLine: true,
                 getDrawingHorizontalLine: (_) =>
                     FlLine(color: chartGridColor(theme), strokeWidth: 1),
+                getDrawingVerticalLine: (_) =>
+                    FlLine(color: chartGridColor(theme), strokeWidth: 1),
+                verticalInterval: bottomInterval,
               ),
               borderData: FlBorderData(show: false),
               titlesData: FlTitlesData(
@@ -7941,8 +8072,9 @@ class PriceChart extends StatelessWidget {
                   sideTitles: SideTitles(
                     showTitles: true,
                     reservedSize: 56,
+                    interval: axisScale.interval,
                     getTitlesWidget: (value, meta) => Text(
-                      compactFormat.format(value),
+                      chartAxisLabel(value),
                       style: theme.textTheme.labelSmall?.copyWith(
                         color: theme.colorScheme.onSurfaceVariant,
                       ),
@@ -7953,7 +8085,7 @@ class PriceChart extends StatelessWidget {
                   sideTitles: SideTitles(
                     showTitles: true,
                     reservedSize: 32,
-                    interval: max(1, points.length / 4).toDouble(),
+                    interval: bottomInterval,
                     getTitlesWidget: (value, meta) {
                       final index = value.round();
                       if (index < 0 || index >= points.length) {
