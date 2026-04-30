@@ -84,6 +84,16 @@ def _ngxpulse_headers() -> dict[str, str]:
     }
 
 
+def _ngxpulse_base_url() -> str:
+    settings = get_settings()
+    base_url = (settings.ngxpulse_base_url or "").strip().rstrip("/")
+    if not base_url:
+        return "https://www.ngxpulse.ng"
+    if "://ngxpulse.ng" in base_url:
+        return base_url.replace("://ngxpulse.ng", "://www.ngxpulse.ng", 1)
+    return base_url
+
+
 def _first(item: dict[str, Any], keys: list[str]) -> Any:
     lowered = {str(key).lower(): value for key, value in item.items()}
     for key in keys:
@@ -250,7 +260,7 @@ def fetch_all_stocks_from_ngx() -> list[dict[str, Any]]:
     if settings.ngxpulse_enabled:
         try:
             response = _get_session().get(
-                f"{settings.ngxpulse_base_url}/api/ngxdata/stocks",
+                f"{_ngxpulse_base_url()}/api/ngxdata/stocks",
                 headers=_ngxpulse_headers(),
                 timeout=20,
             )
@@ -308,7 +318,7 @@ def fetch_historical_prices(
         start_date = from_date or (end_date - timedelta(days=365 * 5))
         try:
             response = _get_session().get(
-                f"{settings.ngxpulse_base_url}/api/ngxdata/prices/{normalized_symbol}",
+                f"{_ngxpulse_base_url()}/api/ngxdata/prices/{normalized_symbol}",
                 params={
                     "from": start_date.isoformat(),
                     "to": end_date.isoformat(),
@@ -471,7 +481,7 @@ def fetch_market_status_from_ngx() -> tuple[str, Any]:
     if settings.ngxpulse_enabled:
         try:
             response = _get_session().get(
-                f"{settings.ngxpulse_base_url}/api/ngxdata/market-status",
+                f"{_ngxpulse_base_url()}/api/ngxdata/market-status",
                 headers=_ngxpulse_headers(),
                 timeout=10,
             )
@@ -515,7 +525,7 @@ def fetch_market_snapshot_from_ngx() -> dict[str, Any]:
     if settings.ngxpulse_enabled:
         try:
             response = _get_session().get(
-                f"{settings.ngxpulse_base_url}/api/ngxdata/market",
+                f"{_ngxpulse_base_url()}/api/ngxdata/market",
                 headers=_ngxpulse_headers(),
                 timeout=10,
             )
@@ -626,11 +636,10 @@ def fetch_company_news_from_ngx(ngx_id: str) -> list[dict[str, Any]]:
 
 
 def fetch_dividend_history_from_ngxpulse(symbol: str, limit: int = 8) -> list[dict[str, Any]]:
-    settings = get_settings()
     normalized_symbol = symbol.strip().upper()
     try:
         response = _get_session().get(
-            f"{settings.ngxpulse_base_url}/api/ngxdata/dividends/{normalized_symbol}",
+            f"{_ngxpulse_base_url()}/api/ngxdata/dividends/{normalized_symbol}",
             params={"limit": limit},
             headers=_ngxpulse_headers(),
             timeout=15,
@@ -664,13 +673,12 @@ def fetch_dividend_history_from_ngxpulse(symbol: str, limit: int = 8) -> list[di
 
 
 def fetch_disclosures_from_ngxpulse(symbol: str | None = None, limit: int = 8) -> list[dict[str, Any]]:
-    settings = get_settings()
     params: dict[str, Any] = {"limit": limit}
     if symbol:
         params["symbol"] = symbol.strip().upper()
     try:
         response = _get_session().get(
-            f"{settings.ngxpulse_base_url}/api/ngxdata/disclosures",
+            f"{_ngxpulse_base_url()}/api/ngxdata/disclosures",
             params=params,
             headers=_ngxpulse_headers(),
             timeout=15,
@@ -709,10 +717,9 @@ def fetch_disclosures_from_ngxpulse(symbol: str | None = None, limit: int = 8) -
 
 
 def fetch_market_news_from_ngxpulse(limit: int = 8) -> list[dict[str, Any]]:
-    settings = get_settings()
     try:
         response = _get_session().get(
-            f"{settings.ngxpulse_base_url}/api/news",
+            f"{_ngxpulse_base_url()}/api/news",
             params={"limit": limit},
             headers=_ngxpulse_headers(),
             timeout=15,

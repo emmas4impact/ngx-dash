@@ -904,13 +904,14 @@ class ApiClient {
       return message;
     }
     final historyRows = (data['history_rows_upserted'] as num?)?.toInt() ?? 0;
+    final sourceLabel = syncSourceLabel(data['source']?.toString());
     if (includeHistory) {
-      return 'Synced ${data['stocks_upserted']} stocks from ${data['source']} and refreshed $historyRows history rows';
+      return 'Synced ${data['stocks_upserted']} stocks from $sourceLabel and refreshed $historyRows history rows';
     }
     if (historyRows > 0) {
-      return 'Synced ${data['stocks_upserted']} stocks from ${data['source']} and updated $historyRows daily snapshots';
+      return 'Synced ${data['stocks_upserted']} stocks from $sourceLabel and updated $historyRows daily snapshots';
     }
-    return 'Synced ${data['stocks_upserted']} stocks from ${data['source']}';
+    return 'Synced ${data['stocks_upserted']} stocks from $sourceLabel';
   }
 
   Future<SyncStatus> syncStatus() async {
@@ -1091,6 +1092,21 @@ String? blankToNull(String value) {
 
 String stockPickerLabel(Stock stock) =>
     blankToNull(stock.name ?? '') ?? stock.symbol;
+
+String syncSourceLabel(String? source) {
+  switch (source) {
+    case 'ngxpulse':
+      return 'NGX Pulse market feed';
+    case 'ngxpulse_history':
+      return 'NGX Pulse historical prices';
+    case 'database_cache':
+      return 'Cached database snapshot';
+    case 'ngx_chart':
+      return 'Legacy NGX chart feed';
+    default:
+      return source ?? 'Unknown';
+  }
+}
 
 ImageProvider<Object>? profileImageProvider(String? value) {
   final trimmed = value?.trim();
@@ -6512,7 +6528,7 @@ class _ChartsScreenState extends State<ChartsScreen> {
         if (stocks.isEmpty) {
           return const EmptyState(
             icon: Icons.show_chart,
-            text: 'No chart-enabled stocks loaded yet.',
+            text: 'No NGX Pulse chart-enabled stocks loaded yet.',
           );
         }
         if (selectedSymbol == null ||
@@ -6720,7 +6736,7 @@ class _AdminScreenState extends State<AdminScreen> {
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
                     : const Icon(Icons.sync),
-                label: const Text('Sync NGX stocks'),
+                label: const Text('Sync market data'),
               ),
               OutlinedButton.icon(
                 onPressed: backfillingHistory ? null : backfillHistory,
@@ -6730,7 +6746,7 @@ class _AdminScreenState extends State<AdminScreen> {
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
                     : const Icon(Icons.history),
-                label: const Text('Backfill 1Y history'),
+                label: const Text('Backfill NGX Pulse history'),
               ),
             ],
           ),
@@ -6773,7 +6789,7 @@ class _AdminScreenState extends State<AdminScreen> {
                       const SizedBox(height: 8),
                       Text('Stocks in database: ${status.stocksCount}'),
                       if (status.source != null)
-                        Text('Source: ${status.source}'),
+                        Text('Source: ${syncSourceLabel(status.source)}'),
                       if (status.lastSuccessAt != null)
                         Text(
                           'Last success: ${DateFormat.yMd().add_jm().format(status.lastSuccessAt!.toLocal())}',

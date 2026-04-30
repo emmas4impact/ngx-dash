@@ -1,7 +1,7 @@
 import base64
 import json
 import logging
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
 
 import requests
 from google.auth.transport.requests import Request as GoogleAuthRequest
@@ -190,6 +190,23 @@ def _record_push_log(db: Session, source: str, message: str | None = None) -> No
     db.add(SyncLog(status="success", source=source, message=message))
 
 
+def _current_wat(now: datetime | None = None) -> datetime:
+    wat = timezone(timedelta(hours=1))
+    base = now or datetime.now(timezone.utc)
+    if base.tzinfo is None:
+        base = base.replace(tzinfo=timezone.utc)
+    return base.astimezone(wat)
+
+
+def _is_live_market_session(now: datetime | None = None) -> bool:
+    wat_now = _current_wat(now)
+    if wat_now.weekday() >= 5:
+        return False
+    market_open = time(hour=9, minute=0)
+    market_close = time(hour=16, minute=0)
+    return market_open <= wat_now.time() <= market_close
+
+
 def _deliver_push_bundle(
     db: Session,
     settings: Settings,
@@ -237,7 +254,12 @@ def dispatch_market_price_alerts(db: Session, settings: Settings) -> dict[str, i
 
     today = date.today().isoformat()
     market_status = db.scalar(select(MarketStatus).order_by(MarketStatus.updated_at.desc(), MarketStatus.id.desc()).limit(1))
-    if market_status is not None and _is_market_open_status(market_status.status):
+    market_is_live = (
+        market_status is not None
+        and _is_market_open_status(market_status.status)
+        and _is_live_market_session()
+    )
+    if market_is_live:
         source = f"market_open_push:{today}"
         if not _sync_log_exists(db, source):
             delivered = _deliver_push_bundle(
@@ -256,6 +278,9 @@ def dispatch_market_price_alerts(db: Session, settings: Settings) -> dict[str, i
                 _record_push_log(db, source, f"Delivered market-open alert to {delivered} device(s).")
                 market_open_alerts_sent = 1
                 tokens_sent += delivered
+
+    if not market_is_live:
+        return {"market_open_alerts_sent": 0, "stock_alerts_sent": 0, "tokens_sent": 0}
 
     movers = db.scalars(
         select(Stock)
