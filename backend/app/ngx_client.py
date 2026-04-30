@@ -84,6 +84,17 @@ def _ngxpulse_headers() -> dict[str, str]:
     }
 
 
+def _ngxpulse_query_params(extra: dict[str, Any] | None = None) -> dict[str, Any]:
+    settings = get_settings()
+    api_key = (settings.ngxpulse_api_key or "").strip()
+    if not api_key:
+        raise NgxFetchError("NGX Pulse API key is not configured.")
+    params: dict[str, Any] = {"X-API-Key": api_key}
+    if extra:
+        params.update(extra)
+    return params
+
+
 def _ngxpulse_base_url() -> str:
     settings = get_settings()
     base_url = (settings.ngxpulse_base_url or "").strip().rstrip("/")
@@ -138,6 +149,8 @@ def _list_payload(payload: Any, keys: list[str]) -> list[Any]:
             if isinstance(value, list):
                 return value
         data = payload.get("data")
+        if isinstance(data, list):
+            return data
         if isinstance(data, dict):
             for key in keys:
                 value = data.get(key)
@@ -261,6 +274,7 @@ def fetch_all_stocks_from_ngx() -> list[dict[str, Any]]:
         try:
             response = _get_session().get(
                 f"{_ngxpulse_base_url()}/api/ngxdata/stocks",
+                params=_ngxpulse_query_params(),
                 headers=_ngxpulse_headers(),
                 timeout=20,
             )
@@ -270,11 +284,17 @@ def fetch_all_stocks_from_ngx() -> list[dict[str, Any]]:
             raise NgxFetchError(f"NGX Pulse stocks request failed: {exc}") from exc
         except ValueError as exc:
             raise NgxFetchError(f"NGX Pulse stocks response was not valid JSON: {exc}") from exc
-        if not isinstance(payload, list):
-            raise NgxFetchError("NGX Pulse stocks response was not a list of equities.")
+        results = _list_payload(payload, ["stocks", "equities", "results", "items", "data"])
+        if not results:
+            if isinstance(payload, dict):
+                payload_keys = ", ".join(sorted(str(key) for key in payload.keys()))
+                raise NgxFetchError(
+                    f"NGX Pulse stocks response did not include an equities list. Payload keys: {payload_keys or 'none'}."
+                )
+            raise NgxFetchError("NGX Pulse stocks response did not include an equities list.")
         return [
             stock
-            for item in payload
+            for item in results
             if isinstance(item, dict) and (stock := normalize_stock(item, "ngxpulse"))
         ]
 
@@ -319,10 +339,12 @@ def fetch_historical_prices(
         try:
             response = _get_session().get(
                 f"{_ngxpulse_base_url()}/api/ngxdata/prices/{normalized_symbol}",
-                params={
-                    "from": start_date.isoformat(),
-                    "to": end_date.isoformat(),
-                },
+                params=_ngxpulse_query_params(
+                    {
+                        "from": start_date.isoformat(),
+                        "to": end_date.isoformat(),
+                    }
+                ),
                 headers=_ngxpulse_headers(),
                 timeout=20,
             )
@@ -482,6 +504,7 @@ def fetch_market_status_from_ngx() -> tuple[str, Any]:
         try:
             response = _get_session().get(
                 f"{_ngxpulse_base_url()}/api/ngxdata/market-status",
+                params=_ngxpulse_query_params(),
                 headers=_ngxpulse_headers(),
                 timeout=10,
             )
@@ -526,6 +549,7 @@ def fetch_market_snapshot_from_ngx() -> dict[str, Any]:
         try:
             response = _get_session().get(
                 f"{_ngxpulse_base_url()}/api/ngxdata/market",
+                params=_ngxpulse_query_params(),
                 headers=_ngxpulse_headers(),
                 timeout=10,
             )
@@ -640,7 +664,7 @@ def fetch_dividend_history_from_ngxpulse(symbol: str, limit: int = 8) -> list[di
     try:
         response = _get_session().get(
             f"{_ngxpulse_base_url()}/api/ngxdata/dividends/{normalized_symbol}",
-            params={"limit": limit},
+            params=_ngxpulse_query_params({"limit": limit}),
             headers=_ngxpulse_headers(),
             timeout=15,
         )
@@ -679,7 +703,7 @@ def fetch_disclosures_from_ngxpulse(symbol: str | None = None, limit: int = 8) -
     try:
         response = _get_session().get(
             f"{_ngxpulse_base_url()}/api/ngxdata/disclosures",
-            params=params,
+            params=_ngxpulse_query_params(params),
             headers=_ngxpulse_headers(),
             timeout=15,
         )
@@ -720,7 +744,7 @@ def fetch_market_news_from_ngxpulse(limit: int = 8) -> list[dict[str, Any]]:
     try:
         response = _get_session().get(
             f"{_ngxpulse_base_url()}/api/news",
-            params={"limit": limit},
+            params=_ngxpulse_query_params({"limit": limit}),
             headers=_ngxpulse_headers(),
             timeout=15,
         )
