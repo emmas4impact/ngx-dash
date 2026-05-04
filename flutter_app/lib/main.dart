@@ -3357,7 +3357,7 @@ class ThemeModeButton extends StatelessWidget {
   }
 }
 
-class LandingStockDetailSheet extends StatelessWidget {
+class LandingStockDetailSheet extends StatefulWidget {
   const LandingStockDetailSheet({
     super.key,
     required this.api,
@@ -3368,12 +3368,35 @@ class LandingStockDetailSheet extends StatelessWidget {
   final Stock stock;
 
   @override
+  State<LandingStockDetailSheet> createState() => _LandingStockDetailSheetState();
+}
+
+class _LandingStockDetailSheetState extends State<LandingStockDetailSheet> {
+  late StockHistoryRange selectedRange = StockHistoryRange.oneYear;
+  late Future<StockDetailBundle> detailFuture = _loadDetail();
+
+  Future<StockDetailBundle> _loadDetail() {
+    return widget.api.publicStockDetail(
+      widget.stock.symbol,
+      range: selectedRange.queryValue,
+    );
+  }
+
+  void selectRange(StockHistoryRange range) {
+    if (range == selectedRange) return;
+    setState(() {
+      selectedRange = range;
+      detailFuture = _loadDetail();
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     return FutureBuilder<StockDetailBundle>(
-      future: api.publicStockDetail(stock.symbol),
+      future: detailFuture,
       builder: (context, snapshot) {
         final detail = snapshot.data;
-        final resolvedStock = detail?.stock ?? stock;
+        final resolvedStock = detail?.stock ?? widget.stock;
         final points = detail?.history ?? [];
         final hasIntradayFallback =
             points.isEmpty &&
@@ -3422,6 +3445,20 @@ class LandingStockDetailSheet extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 16),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: StockHistoryRange.values
+                        .map(
+                          (range) => ChoiceChip(
+                            label: Text(range.label),
+                            selected: selectedRange == range,
+                            onSelected: (_) => selectRange(range),
+                          ),
+                        )
+                        .toList(),
+                  ),
+                  const SizedBox(height: 12),
                   SizedBox(
                     height: 240,
                     child: loading
@@ -3436,6 +3473,7 @@ class LandingStockDetailSheet extends StatelessWidget {
                         : PriceChart(
                             points: points,
                             symbolLabel: resolvedStock.symbol,
+                            rangeLabel: selectedRange.label,
                           ),
                   ),
                   const SizedBox(height: 8),
@@ -3590,6 +3628,7 @@ class _DashboardShellState extends State<DashboardShell> {
   bool webSessionExtended = false;
   bool sessionPromptOpen = false;
   bool webSessionEnding = false;
+  bool webSessionExpiredMessageShown = false;
   bool hideFinancialValues = false;
 
   @override
@@ -3645,6 +3684,7 @@ class _DashboardShellState extends State<DashboardShell> {
     setState(() {
       webSessionDeadline = deadline;
       webSessionExtended = extended;
+      webSessionExpiredMessageShown = false;
     });
     _handleWebSessionTick();
   }
@@ -3694,6 +3734,7 @@ class _DashboardShellState extends State<DashboardShell> {
           setState(() {
             webSessionDeadline = nextDeadline;
             webSessionExtended = true;
+            webSessionExpiredMessageShown = false;
           });
           showMessage(context, 'Session extended for 30 minutes.');
           return;
@@ -3708,7 +3749,7 @@ class _DashboardShellState extends State<DashboardShell> {
   }
 
   Future<bool?> _promptWebSessionExtension() async {
-    var secondsLeft = 5;
+    var secondsLeft = 10;
     var dialogOpen = true;
     BuildContext? dialogContext;
     late void Function(VoidCallback fn) setDialogState;
@@ -3771,8 +3812,11 @@ class _DashboardShellState extends State<DashboardShell> {
         webSessionDeadline = null;
       });
     }
-    ScaffoldMessenger.of(context).hideCurrentSnackBar();
-    showMessage(context, 'Your web session has ended. Please sign in again.');
+    if (!webSessionExpiredMessageShown) {
+      webSessionExpiredMessageShown = true;
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      showMessage(context, 'Session expired. Sign in to continue.');
+    }
     await widget.onSignOut();
   }
 
@@ -5437,6 +5481,7 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
   late Future<List<Holding>> future = widget.api.holdings();
   Holding? selectedHolding;
   Future<StockDetailBundle>? selectedDetailFuture;
+  StockHistoryRange selectedDetailRange = StockHistoryRange.oneYear;
   Timer? refreshTimer;
 
   @override
@@ -5457,7 +5502,10 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
     setState(() {
       future = widget.api.holdings();
       if (selectedHolding != null) {
-        selectedDetailFuture = widget.api.stockDetail(selectedHolding!.symbol);
+        selectedDetailFuture = widget.api.stockDetail(
+          selectedHolding!.symbol,
+          range: selectedDetailRange.queryValue,
+        );
       }
     });
   }
@@ -5465,7 +5513,23 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
   void selectHolding(Holding holding) {
     setState(() {
       selectedHolding = holding;
-      selectedDetailFuture = widget.api.stockDetail(holding.symbol);
+      selectedDetailFuture = widget.api.stockDetail(
+        holding.symbol,
+        range: selectedDetailRange.queryValue,
+      );
+    });
+  }
+
+  void selectDetailRange(StockHistoryRange range) {
+    if (range == selectedDetailRange) return;
+    setState(() {
+      selectedDetailRange = range;
+      if (selectedHolding != null) {
+        selectedDetailFuture = widget.api.stockDetail(
+          selectedHolding!.symbol,
+          range: selectedDetailRange.queryValue,
+        );
+      }
     });
   }
 
@@ -5595,6 +5659,8 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
                     final detail = PortfolioHoldingDetail(
                       holding: selected,
                       detailFuture: selectedDetailFuture,
+                      selectedRange: selectedDetailRange,
+                      onRangeSelected: selectDetailRange,
                     );
                     final holdingCards = holdings
                         .map(
@@ -5880,10 +5946,14 @@ class PortfolioHoldingDetail extends StatelessWidget {
     super.key,
     required this.holding,
     required this.detailFuture,
+    required this.selectedRange,
+    required this.onRangeSelected,
   });
 
   final Holding? holding;
   final Future<StockDetailBundle>? detailFuture;
+  final StockHistoryRange selectedRange;
+  final ValueChanged<StockHistoryRange> onRangeSelected;
 
   @override
   Widget build(BuildContext context) {
@@ -5941,6 +6011,20 @@ class PortfolioHoldingDetail extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 16),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: StockHistoryRange.values
+                      .map(
+                        (range) => ChoiceChip(
+                          label: Text(range.label),
+                          selected: selectedRange == range,
+                          onSelected: (_) => onRangeSelected(range),
+                        ),
+                      )
+                      .toList(),
+                ),
+                const SizedBox(height: 12),
                 SizedBox(
                   height: 240,
                   child: points.isEmpty
@@ -5951,6 +6035,7 @@ class PortfolioHoldingDetail extends StatelessWidget {
                       : PriceChart(
                           points: points,
                           symbolLabel: holding!.symbol,
+                          rangeLabel: selectedRange.label,
                         ),
                 ),
                 const SizedBox(height: 8),
@@ -6394,6 +6479,7 @@ class _StocksScreenState extends State<StocksScreen> {
   late Future<MarketStatus> marketStatusFuture = widget.api.marketStatus();
   Stock? selectedStock;
   Future<StockDetailBundle>? selectedDetailFuture;
+  StockHistoryRange selectedDetailRange = StockHistoryRange.oneYear;
   Timer? refreshTimer;
   Timer? searchDebounce;
   String? searchHint;
@@ -6419,7 +6505,10 @@ class _StocksScreenState extends State<StocksScreen> {
       future = widget.api.stocks(search: search.text.trim());
       marketStatusFuture = widget.api.marketStatus();
       if (selectedStock != null) {
-        selectedDetailFuture = widget.api.stockDetail(selectedStock!.symbol);
+        selectedDetailFuture = widget.api.stockDetail(
+          selectedStock!.symbol,
+          range: selectedDetailRange.queryValue,
+        );
       }
     });
   }
@@ -6427,7 +6516,23 @@ class _StocksScreenState extends State<StocksScreen> {
   void selectStock(Stock stock) {
     setState(() {
       selectedStock = stock;
-      selectedDetailFuture = widget.api.stockDetail(stock.symbol);
+      selectedDetailFuture = widget.api.stockDetail(
+        stock.symbol,
+        range: selectedDetailRange.queryValue,
+      );
+    });
+  }
+
+  void selectDetailRange(StockHistoryRange range) {
+    if (range == selectedDetailRange) return;
+    setState(() {
+      selectedDetailRange = range;
+      if (selectedStock != null) {
+        selectedDetailFuture = widget.api.stockDetail(
+          selectedStock!.symbol,
+          range: selectedDetailRange.queryValue,
+        );
+      }
     });
   }
 
@@ -6539,6 +6644,8 @@ class _StocksScreenState extends State<StocksScreen> {
                       PortfolioHoldingDetail(
                         holding: Holding.fromStock(selectedStock!),
                         detailFuture: selectedDetailFuture,
+                        selectedRange: selectedDetailRange,
+                        onRangeSelected: selectDetailRange,
                       ),
                       const SizedBox(height: 12),
                     ],
