@@ -556,8 +556,24 @@ def fetch_market_status_from_ngx() -> tuple[str, Any, str]:
             raise NgxFetchError(f"NGX Pulse market status response was not valid JSON: {exc}") from exc
         if not isinstance(payload, dict):
             raise NgxFetchError("NGX Pulse market status response was not an object.")
-        raw_status = str(payload.get("status") or "unknown").strip().lower()
-        status = "OPEN" if raw_status == "open" else "CLOSED"
+        data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
+        if not isinstance(data, dict):
+            raise NgxFetchError("NGX Pulse market status payload did not include a status object.")
+
+        human_status = str(data.get("status") or "").strip()
+        raw_status = str(data.get("raw_status") or "").strip()
+        is_open = data.get("is_open")
+        if isinstance(is_open, bool):
+            default_status = "Market Open" if is_open else "Market Closed"
+            status = human_status or raw_status or default_status
+        else:
+            normalized = f"{human_status} {raw_status}".strip().upper().replace("-", "_")
+            if "OPEN" in normalized or "START_INDEX" in normalized:
+                status = human_status or raw_status or "Market Open"
+            elif normalized:
+                status = human_status or raw_status
+            else:
+                status = "UNKNOWN"
         return status, payload, "ngxpulse_market_status"
 
     def fetch_from_doclib() -> tuple[str, Any, str]:
@@ -734,8 +750,8 @@ def fetch_dividend_history_from_ngxpulse(symbol: str, limit: int = 8) -> list[di
     normalized_symbol = symbol.strip().upper()
     try:
         response = _get_session().get(
-            f"{_ngxpulse_base_url()}/api/ngxdata/dividends/{normalized_symbol}",
-            params=_ngxpulse_query_params({"limit": limit}),
+            f"{_ngxpulse_base_url()}/api/ngxdata/dividends",
+            params=_ngxpulse_query_params({"symbol": normalized_symbol, "limit": limit}),
             headers=_ngxpulse_headers(),
             timeout=15,
         )

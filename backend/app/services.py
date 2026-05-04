@@ -313,13 +313,16 @@ def delete_holding(db: Session, user: User, symbol: str) -> bool:
     return bool(result.rowcount)
 
 
-def stock_history_query(db: Session, symbol: str, since: date):
-    return (
-        db.scalars(
-            select(StockPrice)
-            .where(StockPrice.stock_symbol == symbol.strip().upper(), StockPrice.trade_date >= since)
-            .order_by(StockPrice.trade_date)
-        )
-        .unique()
-        .all()
-    )
+def stock_history_query(
+    db: Session,
+    symbol: str,
+    since: date | None = None,
+    limit_trading_days: int | None = None,
+):
+    stmt = select(StockPrice).where(StockPrice.stock_symbol == symbol.strip().upper())
+    if since is not None:
+        stmt = stmt.where(StockPrice.trade_date >= since)
+    rows = list(db.scalars(stmt.order_by(StockPrice.trade_date)).unique().all())
+    if limit_trading_days is not None and limit_trading_days > 0:
+        rows = rows[-limit_trading_days:]
+    return rows

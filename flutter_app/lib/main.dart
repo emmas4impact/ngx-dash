@@ -119,7 +119,24 @@ MarketStatusPalette marketStatusPalette(
             icon: Icons.lock_clock_outlined,
           );
   }
-  if (normalized == 'CLOSED') {
+  if (normalized.contains('PRE_OPEN')) {
+    return theme.brightness == Brightness.dark
+        ? const MarketStatusPalette(
+            base: Color(0xFFA3E635),
+            container: Color(0xFF233012),
+            content: Color(0xFFECFCCB),
+            icon: Icons.schedule_rounded,
+          )
+        : const MarketStatusPalette(
+            base: Color(0xFF65A30D),
+            container: Color(0xFFECFCCB),
+            content: Color(0xFF3F6212),
+            icon: Icons.schedule_rounded,
+          );
+  }
+  if (normalized == 'CLOSED' ||
+      normalized.contains('MARKET_CLOSED') ||
+      normalized.contains('CLOSED')) {
     return theme.brightness == Brightness.dark
         ? const MarketStatusPalette(
             base: Color(0xFFF87171),
@@ -149,7 +166,7 @@ MarketStatusPalette marketStatusPalette(
             icon: Icons.trending_up_rounded,
           );
   }
-  if (normalized == 'OPEN') {
+  if (normalized == 'OPEN' || normalized.contains('MARKET_OPEN')) {
     return theme.brightness == Brightness.dark
         ? const MarketStatusPalette(
             base: Color(0xFF34D399),
@@ -162,21 +179,6 @@ MarketStatusPalette marketStatusPalette(
             container: Color(0xFFD1FAE5),
             content: Color(0xFF065F46),
             icon: Icons.trending_up_rounded,
-          );
-  }
-  if (normalized.contains('PRE_OPEN')) {
-    return theme.brightness == Brightness.dark
-        ? const MarketStatusPalette(
-            base: Color(0xFFA3E635),
-            container: Color(0xFF233012),
-            content: Color(0xFFECFCCB),
-            icon: Icons.schedule_rounded,
-          )
-        : const MarketStatusPalette(
-            base: Color(0xFF65A30D),
-            container: Color(0xFFECFCCB),
-            content: Color(0xFF3F6212),
-            icon: Icons.schedule_rounded,
           );
   }
   return theme.brightness == Brightness.dark
@@ -199,8 +201,13 @@ Color chartGridColor(ThemeData theme) => theme.brightness == Brightness.dark
     : theme.colorScheme.outlineVariant.withValues(alpha: 0.55);
 
 class ChartAxisScale {
-  const ChartAxisScale({required this.maxY, required this.interval});
+  const ChartAxisScale({
+    this.minY = 0,
+    required this.maxY,
+    required this.interval,
+  });
 
+  final double minY;
   final double maxY;
   final double interval;
 }
@@ -231,6 +238,39 @@ ChartAxisScale chartAxisScaleFromZero(
     (highest / interval).ceilToDouble() * interval,
   );
   return ChartAxisScale(maxY: maxY, interval: interval);
+}
+
+ChartAxisScale chartAxisScaleForPrices(
+  Iterable<double> values, {
+  int targetTicks = 4,
+}) {
+  final positiveValues = values.where((value) => value.isFinite && value > 0);
+  if (positiveValues.isEmpty) {
+    return const ChartAxisScale(maxY: 4, interval: 1);
+  }
+
+  final lowest = positiveValues.reduce(min);
+  final highest = positiveValues.reduce(max);
+  final spread = max(highest - lowest, max(highest * 0.03, 0.5));
+  final paddedMin = max(0, lowest - (spread * 0.16));
+  final paddedMax = highest + (spread * 0.16);
+  final roughInterval = max(0.1, (paddedMax - paddedMin) / targetTicks);
+  final exponent = pow(10, (log(roughInterval) / ln10).floor()).toDouble();
+  final normalized = roughInterval / exponent;
+  final niceBase = normalized <= 1
+      ? 1.0
+      : normalized <= 2
+      ? 2.0
+      : normalized <= 5
+      ? 5.0
+      : 10.0;
+  final interval = niceBase * exponent;
+  final minY = max(0.0, (paddedMin / interval).floorToDouble() * interval);
+  final maxY = max(
+    minY + (interval * targetTicks),
+    (paddedMax / interval).ceilToDouble() * interval,
+  );
+  return ChartAxisScale(minY: minY, maxY: maxY, interval: interval);
 }
 
 String chartAxisLabel(double value) {
@@ -852,9 +892,9 @@ class ApiClient {
     _expect(response, 204);
   }
 
-  Future<List<PricePoint>> history(String symbol, {int months = 12}) async {
+  Future<List<PricePoint>> history(String symbol, {String range = '1y'}) async {
     final response = await _client.get(
-      _uri('/stocks/$symbol/history', {'months': '$months'}),
+      _uri('/stocks/$symbol/history', {'range': range}),
       headers: _headers,
     );
     _expect(response, 200);
@@ -864,9 +904,31 @@ class ApiClient {
         .toList();
   }
 
-  Future<StockDetailBundle> stockDetail(String symbol) async {
+  Future<List<DividendRecord>> dividends(
+    String symbol, {
+    int limit = 10,
+  }) async {
     final response = await _client.get(
-      _uri('/stocks/$symbol/detail', {'months': '12', 'news_limit': '6'}),
+      _uri('/stocks/$symbol/dividends', {'limit': '$limit'}),
+      headers: _headers,
+    );
+    _expect(response, 200);
+    final data = jsonDecode(response.body) as List<dynamic>;
+    return data
+        .map((item) => DividendRecord.fromJson(item as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<StockDetailBundle> stockDetail(
+    String symbol, {
+    String range = '1y',
+    int newsLimit = 6,
+  }) async {
+    final response = await _client.get(
+      _uri('/stocks/$symbol/detail', {
+        'range': range,
+        'news_limit': '$newsLimit',
+      }),
       headers: _headers,
     );
     _expect(response, 200);
@@ -875,11 +937,15 @@ class ApiClient {
     );
   }
 
-  Future<StockDetailBundle> publicStockDetail(String symbol) async {
+  Future<StockDetailBundle> publicStockDetail(
+    String symbol, {
+    String range = '1y',
+    int newsLimit = 6,
+  }) async {
     final response = await _client.get(
       _uri('/public/stocks/$symbol/detail', {
-        'months': '12',
-        'news_limit': '6',
+        'range': range,
+        'news_limit': '$newsLimit',
       }),
       headers: _headers,
     );
@@ -1090,8 +1156,28 @@ String? blankToNull(String value) {
   return trimmed.isEmpty ? null : trimmed;
 }
 
-String stockPickerLabel(Stock stock) =>
-    blankToNull(stock.name ?? '') ?? stock.symbol;
+String stockPickerLabel(Stock stock) {
+  final displayName = blankToNull(stock.name ?? '');
+  if (displayName == null || displayName == stock.symbol) {
+    return stock.symbol;
+  }
+  return '${stock.symbol} - $displayName';
+}
+
+enum StockHistoryRange {
+  oneDay('1d', '1D'),
+  fiveDays('5d', '5D'),
+  oneWeek('1w', '1W'),
+  oneMonth('1m', '1M'),
+  sixMonths('6m', '6M'),
+  oneYear('1y', '1Y'),
+  all('all', 'ALL');
+
+  const StockHistoryRange(this.queryValue, this.label);
+
+  final String queryValue;
+  final String label;
+}
 
 String syncSourceLabel(String? source) {
   switch (source) {
@@ -1470,17 +1556,34 @@ class ProfileInput {
 }
 
 class PricePoint {
-  PricePoint({required this.date, required this.open, required this.close});
+  PricePoint({
+    required this.date,
+    required this.open,
+    required this.high,
+    required this.low,
+    required this.close,
+    this.volume,
+  });
 
   final DateTime date;
   final double open;
+  final double high;
+  final double low;
   final double close;
+  final double? volume;
+
+  bool get isBullish => close >= open;
 
   factory PricePoint.fromJson(Map<String, dynamic> json) {
+    final open = asDouble(json['open_price']) ?? asDouble(json['close_price']) ?? 0;
+    final close = asDouble(json['close_price']) ?? open;
     return PricePoint(
       date: DateTime.parse(json['trade_date'] as String),
-      open: asDouble(json['open_price']) ?? asDouble(json['close_price']) ?? 0,
-      close: asDouble(json['close_price']) ?? 0,
+      open: open,
+      high: asDouble(json['high_price']) ?? max(open, close),
+      low: asDouble(json['low_price']) ?? min(open, close),
+      close: close,
+      volume: asDouble(json['volume']),
     );
   }
 }
@@ -6468,51 +6571,67 @@ class ChartsScreen extends StatefulWidget {
 }
 
 class _ChartsScreenState extends State<ChartsScreen> {
-  static const List<int> rangeOptionsMonths = [1, 3, 6, 12, 24];
+  static const List<StockHistoryRange> rangeOptions = StockHistoryRange.values;
 
   late Future<List<Stock>> stocksFuture = widget.api.stocks();
   Future<List<PricePoint>>? historyFuture;
+  Future<List<DividendRecord>>? dividendsFuture;
   String? selectedSymbol;
-  int selectedRangeMonths = 1;
+  StockHistoryRange selectedRange = StockHistoryRange.oneMonth;
+
+  void _loadSelectedStockData(String symbol) {
+    historyFuture = widget.api.history(
+      symbol,
+      range: selectedRange.queryValue,
+    );
+    dividendsFuture = widget.api.dividends(symbol, limit: 10);
+  }
 
   void selectStock(String? symbol) {
     setState(() {
       selectedSymbol = symbol;
-      historyFuture = symbol == null
-          ? null
-          : widget.api.history(symbol, months: selectedRangeMonths);
+      historyFuture = null;
+      dividendsFuture = null;
+      if (symbol != null) {
+        _loadSelectedStockData(symbol);
+      }
     });
   }
 
-  void selectRange(int months) {
-    if (months == selectedRangeMonths) return;
+  void selectRange(StockHistoryRange range) {
+    if (range == selectedRange) return;
     setState(() {
-      selectedRangeMonths = months;
+      selectedRange = range;
       historyFuture = selectedSymbol == null
           ? null
-          : widget.api.history(selectedSymbol!, months: selectedRangeMonths);
+          : widget.api.history(
+              selectedSymbol!,
+              range: selectedRange.queryValue,
+            );
     });
   }
 
-  String rangeLabel(int months) {
-    switch (months) {
-      case 1:
-        return '1M';
-      case 3:
-        return '3M';
-      case 6:
-        return '6M';
-      case 12:
-        return '1Y';
-      case 24:
-        return '2Y';
-      default:
-        return '${months}M';
+  String rangeDescription(StockHistoryRange range) {
+    switch (range) {
+      case StockHistoryRange.oneDay:
+        return 'Single latest trading session';
+      case StockHistoryRange.fiveDays:
+        return 'Last five trading sessions';
+      case StockHistoryRange.oneWeek:
+        return 'Past calendar week';
+      case StockHistoryRange.oneMonth:
+        return 'Past month';
+      case StockHistoryRange.sixMonths:
+        return 'Past six months';
+      case StockHistoryRange.oneYear:
+        return 'Past twelve months';
+      case StockHistoryRange.all:
+        return 'Full available price history';
     }
   }
 
   String get _historySelectionKey =>
-      '${selectedSymbol ?? 'none'}-$selectedRangeMonths';
+      '${selectedSymbol ?? 'none'}-${selectedRange.queryValue}';
 
   @override
   Widget build(BuildContext context) {
@@ -6534,25 +6653,39 @@ class _ChartsScreenState extends State<ChartsScreen> {
         if (selectedSymbol == null ||
             !stocks.any((stock) => stock.symbol == selectedSymbol)) {
           selectedSymbol = stocks.first.symbol;
-          historyFuture = widget.api.history(
-            selectedSymbol!,
-            months: selectedRangeMonths,
-          );
+          _loadSelectedStockData(selectedSymbol!);
         }
         return ListView(
           padding: const EdgeInsets.all(16),
           children: [
             DropdownButtonFormField<String>(
+              isExpanded: true,
               initialValue: selectedSymbol,
               decoration: const InputDecoration(
                 prefixIcon: Icon(Icons.business),
                 labelText: 'Stock',
               ),
+              selectedItemBuilder: (context) => stocks
+                  .map(
+                    (stock) => Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        stockPickerLabel(stock),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  )
+                  .toList(),
               items: stocks
                   .map(
                     (stock) => DropdownMenuItem(
                       value: stock.symbol,
-                      child: Text(stockPickerLabel(stock)),
+                      child: Text(
+                        stockPickerLabel(stock),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                   )
                   .toList(),
@@ -6569,7 +6702,7 @@ class _ChartsScreenState extends State<ChartsScreen> {
             ),
             const SizedBox(height: 4),
             Text(
-              'Daily open and close history to monitor price patterns over shorter and longer windows.',
+              'Switch between quick trade windows and longer-term trend views using NGX Pulse price history. Candles show daily direction, and the touch crosshair exposes exact price levels.',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
@@ -6578,26 +6711,26 @@ class _ChartsScreenState extends State<ChartsScreen> {
             Wrap(
               spacing: 8,
               runSpacing: 8,
-              children: rangeOptionsMonths
+              children: rangeOptions
                   .map(
-                    (months) => ChoiceChip(
-                      label: Text(rangeLabel(months)),
-                      selected: selectedRangeMonths == months,
-                      onSelected: (_) => selectRange(months),
+                    (range) => ChoiceChip(
+                      label: Text(range.label),
+                      selected: selectedRange == range,
+                      onSelected: (_) => selectRange(range),
                     ),
                   )
                   .toList(),
             ),
             const SizedBox(height: 8),
             Text(
-              'Daily chart history is pulled from NGX Pulse historical prices and cached by Stockfolio. Shorter ranges make recent price patterns easier to inspect, while the 2Y view deepens as more daily data accumulates.',
+              '${rangeDescription(selectedRange)}. Dividend history below the chart stays tied to the selected stock so you can review price action beside payout dates.',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
             ),
             const SizedBox(height: 16),
             SizedBox(
-              height: 360,
+              height: 430,
               child: Card(
                 key: ValueKey(_historySelectionKey),
                 child: Padding(
@@ -6621,7 +6754,7 @@ class _ChartsScreenState extends State<ChartsScreen> {
                               return EmptyState(
                                 icon: Icons.show_chart,
                                 text:
-                                    'No history available for the selected ${rangeLabel(selectedRangeMonths)} range yet.',
+                                    'No history available for the selected ${selectedRange.label} range yet.',
                               );
                             }
                             return PriceChart(
@@ -6630,11 +6763,54 @@ class _ChartsScreenState extends State<ChartsScreen> {
                               ),
                               points: points,
                               symbolLabel: selectedSymbol,
-                              rangeLabel: rangeLabel(selectedRangeMonths),
+                              rangeLabel: selectedRange.label,
                             );
                           },
                         ),
                 ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Dividend history',
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 8),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: dividendsFuture == null
+                    ? const EmptyState(
+                        icon: Icons.payments_outlined,
+                        text: 'Select a stock to view recent dividend history.',
+                      )
+                    : FutureBuilder<List<DividendRecord>>(
+                        future: dividendsFuture,
+                        builder: (context, dividendSnapshot) {
+                          if (dividendSnapshot.connectionState ==
+                              ConnectionState.waiting) {
+                            return const Center(
+                              child: Padding(
+                                padding: EdgeInsets.all(24),
+                                child: CircularProgressIndicator(),
+                              ),
+                            );
+                          }
+                          final dividends = dividendSnapshot.data ?? [];
+                          if (dividends.isEmpty) {
+                            return const Text(
+                              'No recent dividend history available for the selected stock.',
+                            );
+                          }
+                          return Column(
+                            children: [
+                              for (final item in dividends) DividendTile(item: item),
+                            ],
+                          );
+                        },
+                      ),
               ),
             ),
           ],
@@ -8705,16 +8881,29 @@ class PriceChart extends StatelessWidget {
     final theme = Theme.of(context);
     final values = [
       ...points.map((point) => point.open),
+      ...points.map((point) => point.high),
+      ...points.map((point) => point.low),
       ...points.map((point) => point.close),
     ];
-    final axisScale = chartAxisScaleFromZero(values);
-    final primary = Theme.of(context).colorScheme.primary;
-    final secondary = Theme.of(context).colorScheme.tertiary;
+    final axisScale = chartAxisScaleForPrices(values);
+    final bullishColor = _gainColor;
+    final bearishColor = _lossColor;
     final latest = points.last;
     final earliest = points.first;
+    final highestHigh = points.map((point) => point.high).reduce(max);
+    final lowestLow = points.map((point) => point.low).reduce(min);
+    final totalVolume = points.fold<double>(
+      0,
+      (sum, point) => sum + (point.volume ?? 0),
+    );
+    final absoluteChange = latest.close - earliest.open;
+    final percentChange = earliest.open > 0
+        ? (absoluteChange / earliest.open) * 100
+        : 0.0;
+    final changeColor = absoluteChange >= 0 ? bullishColor : bearishColor;
     final showYearOnAxis =
         rangeLabel == '1Y' ||
-        rangeLabel == '2Y' ||
+        rangeLabel == 'ALL' ||
         latest.date.year != earliest.date.year;
     final watNow = currentWatTime();
     final latestWatDate = latest.date.toUtc().add(const Duration(hours: 1));
@@ -8722,7 +8911,25 @@ class PriceChart extends StatelessWidget {
         isMarketHoursWat(watNow) && isSameWatDate(latestWatDate, watNow);
     final dateRangeLabel =
         '${DateFormat.MMMd().format(earliest.date)} - ${DateFormat.MMMd().format(latest.date)}';
-    final bottomInterval = max(1, (points.length / 4).ceil()).toDouble();
+    final bottomInterval = max(
+      1,
+      (points.length / (rangeLabel == 'ALL' ? 6 : 4)).ceil(),
+    ).toDouble();
+    final candleWidth = points.length > 220
+        ? 2.4
+        : points.length > 120
+        ? 3.6
+        : 5.2;
+    final candlesticks = [
+      for (var i = 0; i < points.length; i++)
+        CandlestickSpot(
+          x: i.toDouble(),
+          open: points[i].open,
+          high: points[i].high,
+          low: points[i].low,
+          close: points[i].close,
+        ),
+    ];
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -8741,7 +8948,7 @@ class PriceChart extends StatelessWidget {
               ),
             if (rangeLabel != null)
               Text(
-                '$rangeLabel daily view',
+                '$rangeLabel candlestick view',
                 style: theme.textTheme.labelLarge?.copyWith(
                   fontWeight: FontWeight.w700,
                 ),
@@ -8761,37 +8968,134 @@ class PriceChart extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 8),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        Wrap(
+          spacing: 12,
+          runSpacing: 10,
           children: [
-            ChartLegendDot(
-              color: secondary,
-              label: 'Opening price: ${moneyFormat.format(latest.open)}',
+            ChartMetricChip(
+              label: 'Open',
+              value: moneyFormat.format(latest.open),
+              color: theme.colorScheme.tertiary,
             ),
-            const SizedBox(height: 8),
-            ChartLegendDot(
-              color: primary,
-              label: useCurrentPriceLabel
-                  ? 'Current price: ${moneyFormat.format(latest.close)}'
-                  : 'Closing price: ${moneyFormat.format(latest.close)}',
+            ChartMetricChip(
+              label: 'High',
+              value: moneyFormat.format(highestHigh),
+              color: bullishColor,
             ),
-            if (useCurrentPriceLabel) ...[
-              const SizedBox(height: 8),
-              ChartLegendDot(
-                color: theme.colorScheme.onSurfaceVariant.withValues(
-                  alpha: 0.6,
-                ),
-                label: 'Closing price: -',
-              ),
-            ],
+            ChartMetricChip(
+              label: 'Low',
+              value: moneyFormat.format(lowestLow),
+              color: bearishColor,
+            ),
+            ChartMetricChip(
+              label: useCurrentPriceLabel ? 'Current' : 'Close',
+              value: moneyFormat.format(latest.close),
+              color: changeColor,
+            ),
+            ChartMetricChip(
+              label: 'Move',
+              value:
+                  '${absoluteChange >= 0 ? '+' : ''}${moneyFormat.format(absoluteChange)} (${percentChange >= 0 ? '+' : ''}${percentChange.toStringAsFixed(2)}%)',
+              color: changeColor,
+            ),
+            ChartMetricChip(
+              label: 'Volume',
+              value: compactFormat.format(totalVolume),
+              color: theme.colorScheme.secondary,
+            ),
           ],
         ),
         const SizedBox(height: 10),
         Expanded(
-          child: LineChart(
-            LineChartData(
-              minY: 0,
+          child: CandlestickChart(
+            CandlestickChartData(
+              candlestickSpots: candlesticks,
+              minX: 0,
+              maxX: max(1, points.length - 1).toDouble(),
+              minY: axisScale.minY,
               maxY: axisScale.maxY,
+              candlestickPainter: DefaultCandlestickPainter(
+                candlestickStyleProvider: (spot, _) {
+                  final color = spot.isUp ? bullishColor : bearishColor;
+                  return CandlestickStyle(
+                    lineColor: color,
+                    lineWidth: 1.3,
+                    bodyStrokeColor: color,
+                    bodyStrokeWidth: 0,
+                    bodyFillColor: color.withValues(alpha: 0.96),
+                    bodyWidth: candleWidth,
+                    bodyRadius: 1.5,
+                  );
+                },
+              ),
+              candlestickTouchData: CandlestickTouchData(
+                touchSpotThreshold: 28,
+                touchTooltipData: CandlestickTouchTooltipData(
+                  fitInsideHorizontally: true,
+                  fitInsideVertically: true,
+                  maxContentWidth: 220,
+                  tooltipPadding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  getTooltipColor: (spot) => theme.colorScheme.surface,
+                  getTooltipItems: (painter, touchedSpot, spotIndex) {
+                    final tooltipStyle = theme.textTheme.labelMedium?.copyWith(
+                      color: theme.colorScheme.onSurface,
+                      fontWeight: FontWeight.w700,
+                    );
+                    return CandlestickTooltipItem(
+                      DateFormat.yMMMd().format(
+                        points[touchedSpot.x.toInt()].date,
+                      ),
+                      textStyle: tooltipStyle,
+                      textAlign: TextAlign.left,
+                      children: [
+                        TextSpan(
+                          text:
+                              '\nO ${moneyFormat.format(touchedSpot.open)}  H ${moneyFormat.format(touchedSpot.high)}'
+                              '\nL ${moneyFormat.format(touchedSpot.low)}  C ${moneyFormat.format(touchedSpot.close)}',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurface,
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                ),
+              ),
+              touchedPointIndicator: AxisSpotIndicator(
+                painter: AxisLinesIndicatorPainter(
+                  horizontalLineProvider: (y) => HorizontalLine(
+                    y: y,
+                    color: theme.colorScheme.outline.withValues(alpha: 0.65),
+                    strokeWidth: 1,
+                    label: HorizontalLineLabel(
+                      show: true,
+                      alignment: Alignment.topRight,
+                      padding: const EdgeInsets.only(bottom: 2),
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: theme.colorScheme.onSurface,
+                        fontWeight: FontWeight.w700,
+                      ),
+                      labelResolver: (line) => moneyFormat.format(line.y),
+                    ),
+                  ),
+                  verticalLineProvider: (x) {
+                    final spotIndex = x
+                        .round()
+                        .clamp(0, candlesticks.length - 1)
+                        .toInt();
+                    final spot = candlesticks[spotIndex];
+                    final color = spot.isUp ? bullishColor : bearishColor;
+                    return VerticalLine(
+                      x: x,
+                      color: color.withValues(alpha: 0.45),
+                      strokeWidth: 1,
+                    );
+                  },
+                ),
+              ),
               gridData: FlGridData(
                 show: true,
                 drawVerticalLine: true,
@@ -8814,10 +9118,13 @@ class PriceChart extends StatelessWidget {
                     showTitles: true,
                     reservedSize: 56,
                     interval: axisScale.interval,
-                    getTitlesWidget: (value, meta) => Text(
-                      chartAxisLabel(value),
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
+                    getTitlesWidget: (value, meta) => Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: Text(
+                        chartAxisLabel(value),
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
                       ),
                     ),
                   ),
@@ -8848,36 +9155,55 @@ class PriceChart extends StatelessWidget {
                   ),
                 ),
               ),
-              lineBarsData: [
-                LineChartBarData(
-                  spots: [
-                    for (var i = 0; i < points.length; i++)
-                      FlSpot(i.toDouble(), points[i].open),
-                  ],
-                  isCurved: true,
-                  barWidth: 2,
-                  color: secondary,
-                  dotData: const FlDotData(show: false),
-                ),
-                LineChartBarData(
-                  spots: [
-                    for (var i = 0; i < points.length; i++)
-                      FlSpot(i.toDouble(), points[i].close),
-                  ],
-                  isCurved: true,
-                  barWidth: 3,
-                  color: primary,
-                  dotData: const FlDotData(show: false),
-                  belowBarData: BarAreaData(
-                    show: true,
-                    color: primary.withValues(alpha: 0.12),
-                  ),
-                ),
-              ],
             ),
           ),
         ),
       ],
+    );
+  }
+}
+
+class ChartMetricChip extends StatelessWidget {
+  const ChartMetricChip({
+    super.key,
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+
+  final String label;
+  final String value;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: color.withValues(alpha: 0.18)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: Theme.of(context).colorScheme.onSurface,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

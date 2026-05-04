@@ -336,6 +336,64 @@ def stock_history_source(stock: Stock) -> str | None:
     return None
 
 
+def normalize_history_range(range_value: str | None) -> str | None:
+    if range_value is None:
+        return None
+    normalized = (
+        range_value.strip().lower().replace(" ", "").replace("-", "").replace("_", "")
+    )
+    if not normalized:
+        return None
+    aliases = {
+        "1d": "1d",
+        "1day": "1d",
+        "day": "1d",
+        "5d": "5d",
+        "5day": "5d",
+        "5days": "5d",
+        "1w": "1w",
+        "week": "1w",
+        "1week": "1w",
+        "1m": "1m",
+        "month": "1m",
+        "1month": "1m",
+        "6m": "6m",
+        "6month": "6m",
+        "6months": "6m",
+        "1y": "1y",
+        "year": "1y",
+        "1year": "1y",
+        "all": "all",
+        "alltime": "all",
+        "max": "all",
+    }
+    return aliases.get(normalized)
+
+
+def resolve_history_window(
+    *,
+    range_value: str | None,
+    months: int,
+) -> tuple[date | None, int | None]:
+    normalized_range = normalize_history_range(range_value)
+    today = date.today()
+    if normalized_range == "1d":
+        return today - timedelta(days=21), 1
+    if normalized_range == "5d":
+        return today - timedelta(days=30), 5
+    if normalized_range == "1w":
+        return today - timedelta(days=10), None
+    if normalized_range == "1m":
+        return today - relativedelta(months=1), None
+    if normalized_range == "6m":
+        return today - relativedelta(months=6), None
+    if normalized_range == "1y":
+        return today - relativedelta(years=1), None
+    if normalized_range == "all":
+        return None, None
+    return today - relativedelta(months=months), None
+
+
 async def background_stock_sync_loop() -> None:
     interval = max(1, settings.stock_sync_interval_seconds)
     while True:
@@ -976,6 +1034,7 @@ def get_stock_disclosures(
 @app.get("/stocks/{symbol}/history", response_model=list[StockPriceOut])
 def get_stock_history(
     symbol: str,
+    range: str | None = Query(default=None),
     months: int = Query(default=12, ge=1, le=120),
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
@@ -985,8 +1044,8 @@ def get_stock_history(
         raise HTTPException(status_code=404, detail="Stock not found")
 
     ngx_id = stock.ngx_id if settings.ngxpulse_enabled else ensure_stock_ngx_id(db, stock)
-    since = date.today() - relativedelta(months=months)
-    rows = stock_history_query(db, symbol, since)
+    since, limit_trading_days = resolve_history_window(range_value=range, months=months)
+    rows = stock_history_query(db, symbol, since, limit_trading_days)
     if stock.supports_history and (
         not rows
         or any(row.open_price is None for row in rows)
@@ -994,12 +1053,13 @@ def get_stock_history(
     ):
         upsert_stock_history(db, stock.symbol, ngx_id, since=since)
         db.commit()
-        rows = stock_history_query(db, symbol, since)
+        rows = stock_history_query(db, symbol, since, limit_trading_days)
     return rows
 
 
 def build_stock_detail(
     symbol: str,
+    range: str | None = Query(default=None),
     months: int = Query(default=12, ge=1, le=120),
     news_limit: int = Query(default=6, ge=1, le=20),
     db: Session = Depends(get_db),
@@ -1009,15 +1069,15 @@ def build_stock_detail(
         raise HTTPException(status_code=404, detail="Stock not found")
 
     ngx_id = ensure_stock_ngx_id(db, stock)
-    since = date.today() - relativedelta(months=months)
-    rows = stock_history_query(db, symbol, since)
+    since, limit_trading_days = resolve_history_window(range_value=range, months=months)
+    rows = stock_history_query(db, symbol, since, limit_trading_days)
     if stock.supports_history and (
         not rows or any(row.open_price is None for row in rows) or stock_history_is_stale(rows)
     ):
         upsert_stock_history(db, stock.symbol, ngx_id, since=since)
         db.commit()
         db.refresh(stock)
-        rows = stock_history_query(db, symbol, since)
+        rows = stock_history_query(db, symbol, since, limit_trading_days)
 
     market_snapshot = None
     try:
@@ -1058,22 +1118,24 @@ def build_stock_detail(
 @app.get("/public/stocks/{symbol}/detail", response_model=StockDetailOut, include_in_schema=False)
 def get_public_stock_detail(
     symbol: str,
+    range: str | None = Query(default=None),
     months: int = Query(default=12, ge=1, le=120),
     news_limit: int = Query(default=6, ge=1, le=20),
     db: Session = Depends(get_db),
 ) -> dict:
-    return build_stock_detail(symbol, months, news_limit, db)
+    return build_stock_detail(symbol, range, months, news_limit, db)
 
 
 @app.get("/stocks/{symbol}/detail", response_model=StockDetailOut)
 def get_stock_detail(
     symbol: str,
+    range: str | None = Query(default=None),
     months: int = Query(default=12, ge=1, le=120),
     news_limit: int = Query(default=6, ge=1, le=20),
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ) -> dict:
-    return build_stock_detail(symbol, months, news_limit, db)
+    return build_stock_detail(symbol, range, months, news_limit, db)
 
 
 @app.post("/admin/sync/stocks", response_model=SyncResult)
