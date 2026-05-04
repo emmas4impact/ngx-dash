@@ -72,6 +72,8 @@ def sync_stocks(db: Session, include_history: bool = False) -> tuple[str, int, i
             db.commit()
             return source, 0, 0, "failed", message
     else:
+        if stocks:
+            source = str(stocks[0].get("source") or source)
         if not stocks:
             message = "NGX returned no equities. Existing database rows were left unchanged."
             record_sync_log(db, status="warning", source=source, message=message)
@@ -120,7 +122,7 @@ def sync_logs_query(db: Session, limit: int = 50) -> list[SyncLog]:
 
 def refresh_market_status(db: Session) -> dict:
     try:
-        status_text, payload = fetch_market_status_from_ngx()
+        status_text, payload, source = fetch_market_status_from_ngx()
     except NgxFetchError as exc:
         cached = db.scalar(select(MarketStatus).order_by(MarketStatus.updated_at.desc(), MarketStatus.id.desc()).limit(1))
         message = f"{STALE_DATA_MESSAGE} {exc}"
@@ -129,7 +131,7 @@ def refresh_market_status(db: Session) -> dict:
             db.commit()
             db.refresh(cached)
             return market_status_to_dict(cached, stale=True)
-        cached = MarketStatus(status="UNKNOWN", source="ngx_doclib", message=message)
+        cached = MarketStatus(status="UNKNOWN", source="market_status_cache", message=message)
         db.add(cached)
         db.commit()
         db.refresh(cached)
@@ -137,10 +139,10 @@ def refresh_market_status(db: Session) -> dict:
 
     cached = db.scalar(select(MarketStatus).order_by(MarketStatus.updated_at.desc(), MarketStatus.id.desc()).limit(1))
     if cached is None:
-        cached = MarketStatus(status=status_text, source="ngx_doclib")
+        cached = MarketStatus(status=status_text, source=source)
         db.add(cached)
     cached.status = status_text
-    cached.source = "ngx_doclib"
+    cached.source = source
     cached.message = None
     cached.raw_payload = json.dumps(payload)
     db.commit()
