@@ -2,18 +2,19 @@ FROM ghcr.io/cirruslabs/flutter:stable AS build
 
 WORKDIR /app
 
-COPY flutter_app/pubspec.* ./
+COPY flutter_app /app/flutter_app
+COPY scripts /app/scripts
+
+WORKDIR /app/flutter_app
 RUN flutter pub get
 
-COPY flutter_app ./
-
 ARG API_BASE_URL=http://localhost:8000
-RUN flutter build web --release --dart-define=API_BASE_URL=${API_BASE_URL}
+RUN python3 /app/scripts/flutter_build.py web --release --dart-define=API_BASE_URL=${API_BASE_URL}
 
 FROM python:3.12-slim
 
 WORKDIR /app
-COPY --from=build /app/build/web /app
+COPY --from=build /app/flutter_app/build/web /app
 COPY scripts/write_frontend_config.py /usr/local/bin/write_frontend_config.py
 
 EXPOSE 8080

@@ -103740,7 +103740,7 @@ A.IN.prototype={
 ga3D(){return"Web"},
 E(a){return A.kI(!this.e,A.eE(new A.aw9(this),this.c,t.yQ),!0,!1,B.ai,!0,!1)}}
 A.aw9.prototype={
-$2(a,b){var s,r,q,p,o,n=null,m=b.b,l=m==null||m.c.length===0||m.d.length===0?n:m.c+"."+m.d,k=l==null?"1.13.1":l,j=this.a,i=j.ga3D()
+$2(a,b){var s,r,q,p,o,n=null,m=b.b,l=m==null||m.c.length===0||m.d.length===0?n:m.c+"."+m.d,k=l==null?"1.0.12.15":l,j=this.a,i=j.ga3D()
 if(j.e){j=A.v(a)
 s=A.v(a).ax.a===B.T?0.55:0.95
 s=j.ax.k2.be(s)

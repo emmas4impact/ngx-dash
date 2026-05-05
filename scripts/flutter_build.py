@@ -21,14 +21,58 @@ def read_version() -> tuple[str, str]:
 
 
 def git_commit_count() -> str:
-    result = subprocess.run(
-        ["git", "rev-list", "--count", "HEAD"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
+    try:
+        result = subprocess.run(
+            ["git", "rev-list", "--count", "HEAD"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return ""
     return result.stdout.strip()
+
+
+def stamp_web_entrypoint(version_name: str, build_number: str) -> None:
+    build_dir = ROOT / "flutter_app" / "build" / "web"
+    main_js = build_dir / "main.dart.js"
+    bootstrap = build_dir / "flutter_bootstrap.js"
+
+    if not main_js.exists() or not bootstrap.exists():
+        return
+
+    versioned_main_name = f"main.{version_name}.{build_number}.dart.js"
+    versioned_main = build_dir / versioned_main_name
+    for stale_entrypoint in build_dir.glob("main.*.dart.js"):
+        if stale_entrypoint != versioned_main:
+            stale_entrypoint.unlink()
+    for stale_source_map in build_dir.glob("main.*.dart.js.map"):
+        stale_source_map.unlink()
+    if versioned_main.exists():
+        versioned_main.unlink()
+    main_js.rename(versioned_main)
+
+    source_map = build_dir / "main.dart.js.map"
+    if source_map.exists():
+        versioned_source_map_name = f"{versioned_main_name}.map"
+        versioned_source_map = build_dir / versioned_source_map_name
+        if versioned_source_map.exists():
+            versioned_source_map.unlink()
+        source_map.rename(versioned_source_map)
+        content = versioned_main.read_text(encoding="utf-8")
+        content = content.replace(
+            "//# sourceMappingURL=main.dart.js.map",
+            f"//# sourceMappingURL={versioned_source_map_name}",
+        )
+        versioned_main.write_text(content, encoding="utf-8")
+
+    bootstrap_content = bootstrap.read_text(encoding="utf-8")
+    bootstrap_content = bootstrap_content.replace(
+        '"mainJsPath":"main.dart.js"',
+        f'"mainJsPath":"{versioned_main_name}"',
+    )
+    bootstrap.write_text(bootstrap_content, encoding="utf-8")
 
 
 def main() -> None:
@@ -67,9 +111,14 @@ def main() -> None:
     ]
 
     print(f"Building version {version_name}.{build_number}")
-    raise SystemExit(
-        subprocess.run(command, cwd=ROOT / "flutter_app", check=False).returncode,
-    )
+    result = subprocess.run(command, cwd=ROOT / "flutter_app", check=False)
+    if result.returncode != 0:
+        raise SystemExit(result.returncode)
+
+    if args.command and args.command[0] == "web":
+        stamp_web_entrypoint(version_name, build_number)
+
+    raise SystemExit(0)
 
 
 if __name__ == "__main__":
