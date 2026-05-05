@@ -265,10 +265,14 @@ ChartAxisScale chartAxisScaleForPrices(
       ? 5.0
       : 10.0;
   final interval = niceBase * exponent;
-  final minY = max(0.0, (paddedMin / interval).floorToDouble() * interval);
+  final snappedMin = (paddedMin / interval).floorToDouble() * interval;
+  final snappedMax = (paddedMax / interval).ceilToDouble() * interval;
+  final minY = interval >= 1
+      ? max(0.0, snappedMin.floorToDouble())
+      : max(0.0, snappedMin);
   final maxY = max(
     minY + (interval * targetTicks),
-    (paddedMax / interval).ceilToDouble() * interval,
+    interval >= 1 ? snappedMax.ceilToDouble() : snappedMax,
   );
   return ChartAxisScale(minY: minY, maxY: maxY, interval: interval);
 }
@@ -277,6 +281,9 @@ String chartAxisLabel(double value) {
   if (value == 0) return '0';
   if (value >= 10 || value == value.roundToDouble()) {
     return NumberFormat('#,##0').format(value);
+  }
+  if ((value * 2).roundToDouble() == value * 2) {
+    return NumberFormat('#,##0.#').format(value);
   }
   return NumberFormat('#,##0.##').format(value);
 }

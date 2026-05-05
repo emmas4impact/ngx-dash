@@ -36,6 +36,17 @@ if (!window._flutter) {
 _flutter.buildConfig = {"engineRevision":"59aa584fdf100e6c78c785d8a5b565d1de4b48ab","builds":[{"compileTarget":"dart2js","renderer":"canvaskit","mainJsPath":"main.dart.js"},{}]};
 
 
+(() => {
+  finalBuilds:
+  for (const build of _flutter.buildConfig?.builds ?? []) {
+    if (build == null || typeof build.mainJsPath !== 'string') {
+      continue finalBuilds;
+    }
+    const separator = build.mainJsPath.includes('?') ? '&' : '?';
+    build.mainJsPath = `${build.mainJsPath}${separator}v=${Date.now()}`;
+  }
+})();
+
 _flutter.loader.load({
   serviceWorkerSettings: null,
 });
