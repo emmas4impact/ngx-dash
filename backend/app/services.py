@@ -108,7 +108,12 @@ def sync_stocks(db: Session, include_history: bool = False) -> tuple[str, int, i
     for stock_data in stocks:
         stock = upsert_stock(db, stock_data)
         if include_history and (settings.ngxpulse_enabled or stock.ngx_id):
-            history_count += upsert_stock_history(db, stock.symbol, stock.ngx_id)
+            history_count += upsert_stock_history(
+                db,
+                stock.symbol,
+                stock.ngx_id,
+                allow_legacy_fallback=not settings.ngxpulse_enabled,
+            )
         history_count += upsert_daily_stock_snapshot(db, stock)
 
     record_sync_log(
@@ -328,6 +333,7 @@ def upsert_stock_history(
     ngx_id: str | None,
     *,
     since: date | None = None,
+    allow_legacy_fallback: bool = True,
 ) -> int:
     source = "ngxpulse_history" if get_settings().ngxpulse_enabled else "ngx_chart"
     try:
@@ -336,6 +342,7 @@ def upsert_stock_history(
             ngx_id,
             from_date=since,
             to_date=date.today(),
+            allow_legacy_fallback=allow_legacy_fallback,
         )
     except NgxFetchError as exc:
         record_sync_log(
@@ -550,7 +557,13 @@ def refresh_reference_caches(db: Session) -> tuple[int, int]:
 
     for stock in stocks:
         if stock.supports_history:
-            history_rows += upsert_stock_history(db, stock.symbol, stock.ngx_id, since=None)
+            history_rows += upsert_stock_history(
+                db,
+                stock.symbol,
+                stock.ngx_id,
+                since=None,
+                allow_legacy_fallback=not get_settings().ngxpulse_enabled,
+            )
         if not get_settings().ngxpulse_enabled:
             continue
         try:

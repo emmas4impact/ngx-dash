@@ -1072,7 +1072,13 @@ def get_stock_history(
         since=since,
         limit_trading_days=limit_trading_days,
     ):
-        upsert_stock_history(db, stock.symbol, ngx_id, since=fetch_since)
+        upsert_stock_history(
+            db,
+            stock.symbol,
+            ngx_id,
+            since=fetch_since,
+            allow_legacy_fallback=not settings.ngxpulse_enabled,
+        )
         db.commit()
         rows = stock_history_query(db, symbol, since, limit_trading_days)
     return rows
@@ -1100,7 +1106,13 @@ def build_stock_detail(
         since=since,
         limit_trading_days=limit_trading_days,
     ):
-        upsert_stock_history(db, stock.symbol, ngx_id, since=fetch_since)
+        upsert_stock_history(
+            db,
+            stock.symbol,
+            ngx_id,
+            since=fetch_since,
+            allow_legacy_fallback=not settings.ngxpulse_enabled,
+        )
         db.commit()
         db.refresh(stock)
         rows = stock_history_query(db, symbol, since, limit_trading_days)

@@ -347,6 +347,7 @@ def fetch_historical_prices(
     *,
     from_date: date | None = None,
     to_date: date | None = None,
+    allow_legacy_fallback: bool = True,
 ) -> list[dict[str, Any]]:
     def fetch_from_ngxpulse(normalized_symbol: str, start_date: date, end_date: date) -> list[dict[str, Any]]:
         try:
@@ -438,6 +439,8 @@ def fetch_historical_prices(
         try:
             return fetch_from_ngxpulse(normalized_symbol, start_date, end_date)
         except NgxFetchError as pulse_exc:
+            if not allow_legacy_fallback:
+                raise pulse_exc
             fallback_ngx_id = ngx_id
             if not fallback_ngx_id:
                 try:
@@ -748,19 +751,41 @@ def fetch_company_news_from_ngx(ngx_id: str) -> list[dict[str, Any]]:
 
 def fetch_dividend_history_from_ngxpulse(symbol: str, limit: int = 8) -> list[dict[str, Any]]:
     normalized_symbol = symbol.strip().upper()
-    try:
-        response = _get_session().get(
+    last_error: Exception | None = None
+    payload: Any = None
+    request_variants = [
+        (
+            f"{_ngxpulse_base_url()}/api/ngxdata/dividends/{normalized_symbol}",
+            _ngxpulse_query_params({"limit": limit}),
+        ),
+        (
             f"{_ngxpulse_base_url()}/api/ngxdata/dividends",
-            params=_ngxpulse_query_params({"symbol": normalized_symbol, "limit": limit}),
-            headers=_ngxpulse_headers(),
-            timeout=15,
-        )
-        response.raise_for_status()
-        payload = response.json()
-    except requests.RequestException as exc:
-        raise NgxFetchError(f"NGX Pulse dividend history request failed for {normalized_symbol}: {exc}") from exc
-    except ValueError as exc:
-        raise NgxFetchError(f"NGX Pulse dividend history response was not valid JSON for {normalized_symbol}: {exc}") from exc
+            _ngxpulse_query_params({"symbol": normalized_symbol, "limit": limit}),
+        ),
+    ]
+
+    for url, params in request_variants:
+        try:
+            response = _get_session().get(
+                url,
+                params=params,
+                headers=_ngxpulse_headers(),
+                timeout=15,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            break
+        except requests.RequestException as exc:
+            last_error = exc
+            continue
+        except ValueError as exc:
+            raise NgxFetchError(
+                f"NGX Pulse dividend history response was not valid JSON for {normalized_symbol}: {exc}"
+            ) from exc
+    else:
+        raise NgxFetchError(
+            f"NGX Pulse dividend history request failed for {normalized_symbol}: {last_error}"
+        ) from last_error
 
     history = _list_payload(payload, ["history", "dividends", "results", "items"])
     items: list[dict[str, Any]] = []
@@ -879,8 +904,15 @@ def fetch_historical_prices_cached(
     *,
     from_date: date | None = None,
     to_date: date | None = None,
+    allow_legacy_fallback: bool = True,
 ) -> list[dict[str, Any]]:
-    return fetch_historical_prices(symbol, ngx_id, from_date=from_date, to_date=to_date)
+    return fetch_historical_prices(
+        symbol,
+        ngx_id,
+        from_date=from_date,
+        to_date=to_date,
+        allow_legacy_fallback=allow_legacy_fallback,
+    )
 
 
 @_ttl_cache(ttl_seconds=900)

@@ -24,6 +24,7 @@ const _themeModePreferenceKey = 'theme_mode';
 const _webSessionDeadlineKey = 'web_session_deadline_ms';
 const _webSessionExtendedKey = 'web_session_extended';
 const _financialPrivacyPreferenceKey = 'financial_privacy_hidden';
+const _chartTypePreferenceKey = 'preferred_chart_type';
 const _seedColor = Color(0xFF00A86B);
 const _gainColor = Color(0xFF00B67A);
 const _lossColor = Color(0xFFFF5A7A);
@@ -7063,7 +7064,7 @@ class _AdminScreenState extends State<AdminScreen> {
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
                     : const Icon(Icons.history),
-                label: const Text('Backfill NGX Pulse history'),
+                label: const Text('Refresh cached history'),
               ),
             ],
           ),
@@ -9021,6 +9022,77 @@ enum PriceChartType {
   final String label;
 }
 
+PriceChartType _preferredChartType = PriceChartType.candlestick;
+
+PriceChartType parsePriceChartType(String? value) {
+  for (final type in PriceChartType.values) {
+    if (type.name == value) return type;
+  }
+  return PriceChartType.candlestick;
+}
+
+List<PricePoint> chartDisplayPoints(
+  List<PricePoint> points,
+  PriceChartType type,
+  String? rangeLabel,
+) {
+  if (type != PriceChartType.bar) return points;
+  if (points.length <= 90) return points;
+  if (rangeLabel != '6M' && rangeLabel != '1Y' && rangeLabel != 'ALL') {
+    return points;
+  }
+
+  final buckets = <String, List<PricePoint>>{};
+  for (final point in points) {
+    final key = '${point.date.year}-${point.date.month.toString().padLeft(2, '0')}';
+    buckets.putIfAbsent(key, () => <PricePoint>[]).add(point);
+  }
+
+  return buckets.values.map((bucket) {
+    final first = bucket.first;
+    final last = bucket.last;
+    return PricePoint(
+      date: last.date,
+      open: first.open,
+      high: bucket.map((item) => item.high).reduce(max),
+      low: bucket.map((item) => item.low).reduce(min),
+      close: last.close,
+      volume: bucket.fold<double>(0, (sum, item) => sum + (item.volume ?? 0)),
+    );
+  }).toList();
+}
+
+Set<int> chartBottomLabelIndices(List<PricePoint> points, PriceChartType type) {
+  if (points.isEmpty) return const <int>{};
+  if (type != PriceChartType.bar && points.length <= 12) {
+    return {for (var i = 0; i < points.length; i++) i};
+  }
+
+  final monthChangeIndices = <int>[0];
+  for (var i = 1; i < points.length; i++) {
+    final previous = points[i - 1].date;
+    final current = points[i].date;
+    if (previous.month != current.month || previous.year != current.year) {
+      monthChangeIndices.add(i);
+    }
+  }
+  if (monthChangeIndices.last != points.length - 1) {
+    monthChangeIndices.add(points.length - 1);
+  }
+
+  final targetCount = type == PriceChartType.bar ? 6 : 5;
+  if (monthChangeIndices.length <= targetCount) {
+    return monthChangeIndices.toSet();
+  }
+  final step = (monthChangeIndices.length / targetCount).ceil();
+  final result = <int>{};
+  for (var i = 0; i < monthChangeIndices.length; i += step) {
+    result.add(monthChangeIndices[i]);
+  }
+  result.add(monthChangeIndices.last);
+  return result;
+}
+
 class PriceChart extends StatefulWidget {
   const PriceChart({
     super.key,
@@ -9043,22 +9115,56 @@ class _PriceChartState extends State<PriceChart> {
   late PriceChartType selectedType = PriceChartType.candlestick;
 
   @override
+  void initState() {
+    super.initState();
+    selectedType = _preferredChartType;
+    _restorePreferredChartType();
+  }
+
+  Future<void> _restorePreferredChartType() async {
+    final prefs = await SharedPreferences.getInstance();
+    final restored = parsePriceChartType(
+      prefs.getString(_chartTypePreferenceKey),
+    );
+    _preferredChartType = restored;
+    if (!mounted || restored == selectedType) return;
+    setState(() => selectedType = restored);
+  }
+
+  Future<void> _setSelectedType(PriceChartType type) async {
+    if (type == selectedType) return;
+    setState(() => selectedType = type);
+    _preferredChartType = type;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_chartTypePreferenceKey, type.name);
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final displayPoints = chartDisplayPoints(
+      widget.points,
+      selectedType,
+      widget.rangeLabel,
+    );
+    final bottomLabelIndices = chartBottomLabelIndices(
+      displayPoints,
+      selectedType,
+    );
     final theme = Theme.of(context);
     final values = [
-      ...widget.points.map((point) => point.open),
-      ...widget.points.map((point) => point.high),
-      ...widget.points.map((point) => point.low),
-      ...widget.points.map((point) => point.close),
+      ...displayPoints.map((point) => point.open),
+      ...displayPoints.map((point) => point.high),
+      ...displayPoints.map((point) => point.low),
+      ...displayPoints.map((point) => point.close),
     ];
     final axisScale = chartAxisScaleForPrices(values);
     final bullishColor = _gainColor;
     final bearishColor = _lossColor;
-    final latest = widget.points.last;
-    final earliest = widget.points.first;
-    final highestHigh = widget.points.map((point) => point.high).reduce(max);
-    final lowestLow = widget.points.map((point) => point.low).reduce(min);
-    final totalVolume = widget.points.fold<double>(
+    final latest = displayPoints.last;
+    final earliest = displayPoints.first;
+    final highestHigh = displayPoints.map((point) => point.high).reduce(max);
+    final lowestLow = displayPoints.map((point) => point.low).reduce(min);
+    final totalVolume = displayPoints.fold<double>(
       0,
       (sum, point) => sum + (point.volume ?? 0),
     );
@@ -9077,34 +9183,58 @@ class _PriceChartState extends State<PriceChart> {
         isMarketHoursWat(watNow) && isSameWatDate(latestWatDate, watNow);
     final dateRangeLabel =
         '${DateFormat.MMMd().format(earliest.date)} - ${DateFormat.MMMd().format(latest.date)}';
-    final bottomInterval = max(
+    final verticalInterval = max(
       1,
-      (widget.points.length / (widget.rangeLabel == 'ALL' ? 6 : 4)).ceil(),
+      (displayPoints.length / (selectedType == PriceChartType.bar ? 6 : 4))
+          .ceil(),
     ).toDouble();
-    final candleWidth = widget.points.length > 220
+    final candleWidth = displayPoints.length > 220
         ? 2.4
-        : widget.points.length > 120
+        : displayPoints.length > 120
         ? 3.6
         : 5.2;
     final candlesticks = [
-      for (var i = 0; i < widget.points.length; i++)
+      for (var i = 0; i < displayPoints.length; i++)
         CandlestickSpot(
           x: i.toDouble(),
-          open: widget.points[i].open,
-          high: widget.points[i].high,
-          low: widget.points[i].low,
-          close: widget.points[i].close,
+          open: displayPoints[i].open,
+          high: displayPoints[i].high,
+          low: displayPoints[i].low,
+          close: displayPoints[i].close,
         ),
     ];
     final closeSpots = [
-      for (var i = 0; i < widget.points.length; i++)
-        FlSpot(i.toDouble(), widget.points[i].close),
+      for (var i = 0; i < displayPoints.length; i++)
+        FlSpot(i.toDouble(), displayPoints[i].close),
     ];
     final compactChart = !widget.showSummaryMetrics;
     final chartHeight = compactChart ? 230.0 : 290.0;
     final axisLabelStyle = theme.textTheme.labelSmall?.copyWith(
       color: theme.colorScheme.onSurfaceVariant,
     );
+    final useMonthlyBarLabels =
+        selectedType == PriceChartType.bar && displayPoints.length != widget.points.length;
+    final barWidth = displayPoints.length > 60
+        ? 8.0
+        : displayPoints.length > 24
+        ? 12.0
+        : 18.0;
+
+    String chartDateLabel(DateTime value) {
+      if (useMonthlyBarLabels) {
+        return DateFormat('MMM yy').format(value);
+      }
+      return showYearOnAxis
+          ? DateFormat('MMM yy').format(value)
+          : DateFormat.MMM().format(value);
+    }
+
+    String tooltipDateLabel(DateTime value) {
+      if (useMonthlyBarLabels) {
+        return DateFormat.yMMM().format(value);
+      }
+      return DateFormat.yMMMd().format(value);
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -9151,7 +9281,7 @@ class _PriceChartState extends State<PriceChart> {
                 (type) => ChoiceChip(
                   label: Text(type.label),
                   selected: selectedType == type,
-                  onSelected: (_) => setState(() => selectedType = type),
+                  onSelected: (_) => _setSelectedType(type),
                 ),
               )
               .toList(),
@@ -9204,7 +9334,7 @@ class _PriceChartState extends State<PriceChart> {
               CandlestickChartData(
                 candlestickSpots: candlesticks,
                 minX: 0,
-                maxX: max(1, widget.points.length - 1).toDouble(),
+                maxX: max(1, displayPoints.length - 1).toDouble(),
                 minY: axisScale.minY,
                 maxY: axisScale.maxY,
                 candlestickPainter: DefaultCandlestickPainter(
@@ -9239,7 +9369,7 @@ class _PriceChartState extends State<PriceChart> {
                       );
                       return CandlestickTooltipItem(
                         DateFormat.yMMMd().format(
-                          widget.points[touchedSpot.x.toInt()].date,
+                          displayPoints[touchedSpot.x.toInt()].date,
                         ),
                         textStyle: tooltipStyle,
                         textAlign: TextAlign.left,
@@ -9296,7 +9426,7 @@ class _PriceChartState extends State<PriceChart> {
                       FlLine(color: chartGridColor(theme), strokeWidth: 1),
                   getDrawingVerticalLine: (_) =>
                       FlLine(color: chartGridColor(theme), strokeWidth: 1),
-                  verticalInterval: bottomInterval,
+                  verticalInterval: verticalInterval,
                 ),
                 borderData: FlBorderData(show: false),
                 titlesData: FlTitlesData(
@@ -9324,19 +9454,19 @@ class _PriceChartState extends State<PriceChart> {
                     sideTitles: SideTitles(
                       showTitles: true,
                       reservedSize: 32,
-                      interval: bottomInterval,
+                      interval: 1,
                       getTitlesWidget: (value, meta) {
                         final index = value.round();
-                        if (index < 0 || index >= widget.points.length) {
+                        if (index < 0 ||
+                            index >= displayPoints.length ||
+                            !bottomLabelIndices.contains(index)) {
                           return const SizedBox.shrink();
                         }
-                        final point = widget.points[index];
+                        final point = displayPoints[index];
                         return Padding(
                           padding: const EdgeInsets.only(top: 8),
                           child: Text(
-                            showYearOnAxis
-                                ? DateFormat('MMM yy').format(point.date)
-                                : DateFormat.MMM().format(point.date),
+                            chartDateLabel(point.date),
                             style: axisLabelStyle,
                           ),
                         );
@@ -9349,14 +9479,14 @@ class _PriceChartState extends State<PriceChart> {
             PriceChartType.line => LineChart(
               LineChartData(
                 minX: 0,
-                maxX: max(1, widget.points.length - 1).toDouble(),
+                maxX: max(1, displayPoints.length - 1).toDouble(),
                 minY: axisScale.minY,
                 maxY: axisScale.maxY,
                 borderData: FlBorderData(show: false),
                 gridData: FlGridData(
                   show: true,
                   drawVerticalLine: true,
-                  verticalInterval: bottomInterval,
+                  verticalInterval: verticalInterval,
                   getDrawingHorizontalLine: (_) =>
                       FlLine(color: chartGridColor(theme), strokeWidth: 1),
                   getDrawingVerticalLine: (_) =>
@@ -9371,7 +9501,7 @@ class _PriceChartState extends State<PriceChart> {
                     getTooltipItems: (spots) => spots
                         .map(
                           (spot) => LineTooltipItem(
-                            '${DateFormat.yMMMd().format(widget.points[spot.x.toInt()].date)}\n${moneyFormat.format(spot.y)}',
+                            '${tooltipDateLabel(displayPoints[spot.x.toInt()].date)}\n${moneyFormat.format(spot.y)}',
                             theme.textTheme.labelMedium!.copyWith(
                               color: theme.colorScheme.onSurface,
                               fontWeight: FontWeight.w700,
@@ -9403,19 +9533,19 @@ class _PriceChartState extends State<PriceChart> {
                     sideTitles: SideTitles(
                       showTitles: true,
                       reservedSize: 32,
-                      interval: bottomInterval,
+                      interval: 1,
                       getTitlesWidget: (value, meta) {
                         final index = value.round();
-                        if (index < 0 || index >= widget.points.length) {
+                        if (index < 0 ||
+                            index >= displayPoints.length ||
+                            !bottomLabelIndices.contains(index)) {
                           return const SizedBox.shrink();
                         }
-                        final point = widget.points[index];
+                        final point = displayPoints[index];
                         return Padding(
                           padding: const EdgeInsets.only(top: 8),
                           child: Text(
-                            showYearOnAxis
-                                ? DateFormat('MMM yy').format(point.date)
-                                : DateFormat.MMM().format(point.date),
+                            chartDateLabel(point.date),
                             style: axisLabelStyle,
                           ),
                         );
@@ -9457,9 +9587,9 @@ class _PriceChartState extends State<PriceChart> {
                     fitInsideVertically: true,
                     getTooltipColor: (_) => theme.colorScheme.surface,
                     getTooltipItem: (group, groupIndex, rod, rodIndex) {
-                      final point = widget.points[group.x.toInt()];
+                      final point = displayPoints[group.x.toInt()];
                       return BarTooltipItem(
-                        '${DateFormat.yMMMd().format(point.date)}\n${moneyFormat.format(rod.toY)}',
+                        '${tooltipDateLabel(point.date)}\n${moneyFormat.format(rod.toY)}',
                         theme.textTheme.labelMedium!.copyWith(
                           color: theme.colorScheme.onSurface,
                           fontWeight: FontWeight.w700,
@@ -9490,19 +9620,19 @@ class _PriceChartState extends State<PriceChart> {
                     sideTitles: SideTitles(
                       showTitles: true,
                       reservedSize: 32,
-                      interval: bottomInterval,
+                      interval: 1,
                       getTitlesWidget: (value, meta) {
                         final index = value.round();
-                        if (index < 0 || index >= widget.points.length) {
+                        if (index < 0 ||
+                            index >= displayPoints.length ||
+                            !bottomLabelIndices.contains(index)) {
                           return const SizedBox.shrink();
                         }
-                        final point = widget.points[index];
+                        final point = displayPoints[index];
                         return Padding(
                           padding: const EdgeInsets.only(top: 8),
                           child: Text(
-                            showYearOnAxis
-                                ? DateFormat('MMM yy').format(point.date)
-                                : DateFormat.MMM().format(point.date),
+                            chartDateLabel(point.date),
                             style: axisLabelStyle,
                           ),
                         );
@@ -9511,14 +9641,14 @@ class _PriceChartState extends State<PriceChart> {
                   ),
                 ),
                 barGroups: [
-                  for (var i = 0; i < widget.points.length; i++)
+                  for (var i = 0; i < displayPoints.length; i++)
                     BarChartGroupData(
                       x: i,
                       barRods: [
                         BarChartRodData(
-                          toY: widget.points[i].close,
-                          width: widget.points.length > 100 ? 5 : 8,
-                          color: widget.points[i].close >= widget.points[i].open
+                          toY: displayPoints[i].close,
+                          width: barWidth,
+                          color: displayPoints[i].close >= displayPoints[i].open
                               ? bullishColor
                               : bearishColor,
                           borderRadius: BorderRadius.circular(4),
@@ -9531,14 +9661,14 @@ class _PriceChartState extends State<PriceChart> {
             PriceChartType.scatter => ScatterChart(
               ScatterChartData(
                 minX: 0,
-                maxX: max(1, widget.points.length - 1).toDouble(),
+                maxX: max(1, displayPoints.length - 1).toDouble(),
                 minY: axisScale.minY,
                 maxY: axisScale.maxY,
                 borderData: FlBorderData(show: false),
                 gridData: FlGridData(
                   show: true,
                   drawVerticalLine: true,
-                  verticalInterval: bottomInterval,
+                  verticalInterval: verticalInterval,
                   getDrawingHorizontalLine: (_) =>
                       FlLine(color: chartGridColor(theme), strokeWidth: 1),
                   getDrawingVerticalLine: (_) =>
@@ -9551,9 +9681,9 @@ class _PriceChartState extends State<PriceChart> {
                     fitInsideVertically: true,
                     getTooltipColor: (_) => theme.colorScheme.surface,
                     getTooltipItems: (spot) {
-                      final point = widget.points[spot.x.toInt()];
+                      final point = displayPoints[spot.x.toInt()];
                       return ScatterTooltipItem(
-                        '${DateFormat.yMMMd().format(point.date)}\n${moneyFormat.format(spot.y)}',
+                        '${tooltipDateLabel(point.date)}\n${moneyFormat.format(spot.y)}',
                         textStyle: theme.textTheme.labelMedium?.copyWith(
                           color: theme.colorScheme.onSurface,
                           fontWeight: FontWeight.w700,
@@ -9584,19 +9714,19 @@ class _PriceChartState extends State<PriceChart> {
                     sideTitles: SideTitles(
                       showTitles: true,
                       reservedSize: 32,
-                      interval: bottomInterval,
+                      interval: 1,
                       getTitlesWidget: (value, meta) {
                         final index = value.round();
-                        if (index < 0 || index >= widget.points.length) {
+                        if (index < 0 ||
+                            index >= displayPoints.length ||
+                            !bottomLabelIndices.contains(index)) {
                           return const SizedBox.shrink();
                         }
-                        final point = widget.points[index];
+                        final point = displayPoints[index];
                         return Padding(
                           padding: const EdgeInsets.only(top: 8),
                           child: Text(
-                            showYearOnAxis
-                                ? DateFormat('MMM yy').format(point.date)
-                                : DateFormat.MMM().format(point.date),
+                            chartDateLabel(point.date),
                             style: axisLabelStyle,
                           ),
                         );
@@ -9605,13 +9735,13 @@ class _PriceChartState extends State<PriceChart> {
                   ),
                 ),
                 scatterSpots: [
-                  for (var i = 0; i < widget.points.length; i++)
+                  for (var i = 0; i < displayPoints.length; i++)
                     ScatterSpot(
                       i.toDouble(),
-                      widget.points[i].close,
+                      displayPoints[i].close,
                       dotPainter: FlDotCirclePainter(
                         radius: compactChart ? 4.2 : 5.2,
-                        color: widget.points[i].close >= widget.points[i].open
+                        color: displayPoints[i].close >= displayPoints[i].open
                             ? bullishColor
                             : bearishColor,
                       ),
