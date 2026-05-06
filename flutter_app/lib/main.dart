@@ -38,7 +38,7 @@ String stockLogoUrl(String symbol) =>
 String stockLogoAssetPath(String symbol) =>
     'assets/company_logos/${symbol.trim().toUpperCase()}.png';
 
-const _appBrandAsset = 'assets/app_icon/stockfolio_app_icon.png';
+const _appBrandAsset = 'assets/app_icon/stockfoliong_app_icon.png';
 
 IconData trendDirectionIcon(bool positive) =>
     positive ? Icons.trending_up_rounded : Icons.trending_down_rounded;
@@ -6253,6 +6253,9 @@ class DividendTile extends StatelessWidget {
     final exDate = item.exDividendDate == null
         ? 'TBA'
         : DateFormat.yMMMd().format(item.exDividendDate!);
+    final recordDate = item.recordDate == null
+        ? 'TBA'
+        : DateFormat.yMMMd().format(item.recordDate!);
     final payDate = item.payDate == null
         ? 'TBA'
         : DateFormat.yMMMd().format(item.payDate!);
@@ -6278,6 +6281,10 @@ class DividendTile extends StatelessWidget {
             _MetaPill(
               icon: Icons.event_available_outlined,
               text: 'Ex-date $exDate',
+            ),
+            _MetaPill(
+              icon: Icons.fact_check_outlined,
+              text: 'Record date $recordDate',
             ),
             _MetaPill(
               icon: Icons.calendar_month_outlined,
