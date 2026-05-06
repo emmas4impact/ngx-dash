@@ -119,6 +119,7 @@ class HoldingUpsert(BaseModel):
     manual_name: str | None = None
     manual_current_price: float | None = Field(default=None, ge=0)
     notes: str | None = None
+    merge_with_existing: bool = True
 
 
 class HoldingOut(BaseModel):

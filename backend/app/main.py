@@ -21,11 +21,6 @@ from .ngx_client import (
     NgxFetchError,
     discover_stock_ngx_id,
     fetch_all_stocks_from_ngx_cached,
-    fetch_company_news_cached,
-    fetch_disclosures_cached,
-    fetch_dividend_history_cached,
-    fetch_market_snapshot_cached,
-    fetch_market_news_cached,
     fetch_stock_logo,
 )
 from .push import PushDeliveryError, dispatch_market_price_alerts, remove_push_token, send_push_message, upsert_push_token
@@ -66,9 +61,16 @@ from .schemas import (
 )
 from .services import (
     delete_holding,
+    get_cached_company_news,
+    get_cached_disclosures,
+    get_cached_dividend_history,
+    get_cached_market_news,
+    get_cached_market_snapshot,
     get_cached_market_status,
     holding_to_dict,
     record_sync_log,
+    reference_cache_refresh_due,
+    refresh_reference_caches,
     refresh_market_status,
     stock_history_query,
     sync_logs_query,
@@ -110,6 +112,35 @@ def stock_history_is_stale(rows: list) -> bool:
 
     refresh_after = timedelta(seconds=max(1, settings.stock_sync_interval_seconds))
     return datetime.now(timezone.utc) - latest_updated_at > refresh_after
+
+
+def stock_history_needs_backfill(
+    rows: list,
+    *,
+    normalized_range: str | None,
+    since: date | None,
+    limit_trading_days: int | None,
+) -> bool:
+    if not rows:
+        return True
+    if any(row.open_price is None for row in rows):
+        return True
+    if stock_history_is_stale(rows):
+        return True
+    if normalized_range == "all":
+        oldest = min((row.trade_date for row in rows), default=None)
+        if oldest is None:
+            return True
+        return len(rows) < 90 or oldest > date.today() - relativedelta(months=6)
+    if limit_trading_days is not None and limit_trading_days > 0:
+        return len(rows) < limit_trading_days
+    if since is None:
+        return False
+    oldest = min((row.trade_date for row in rows), default=None)
+    if oldest is None:
+        return True
+    grace_days = 5 if normalized_range in {"1w", "1m"} else 14
+    return oldest > since + timedelta(days=grace_days)
 
 
 def intraday_leader_payload(stock: Stock) -> dict | None:
@@ -357,6 +388,9 @@ def normalize_history_range(range_value: str | None) -> str | None:
         "1m": "1m",
         "month": "1m",
         "1month": "1m",
+        "3m": "3m",
+        "3month": "3m",
+        "3months": "3m",
         "6m": "6m",
         "6month": "6m",
         "6months": "6m",
@@ -385,6 +419,8 @@ def resolve_history_window(
         return today - timedelta(days=10), None
     if normalized_range == "1m":
         return today - relativedelta(months=1), None
+    if normalized_range == "3m":
+        return today - relativedelta(months=3), None
     if normalized_range == "6m":
         return today - relativedelta(months=6), None
     if normalized_range == "1y":
@@ -401,6 +437,8 @@ async def background_stock_sync_loop() -> None:
         try:
             await asyncio.to_thread(sync_stocks, db, False)
             await asyncio.to_thread(refresh_market_status, db)
+            if await asyncio.to_thread(reference_cache_refresh_due, db):
+                await asyncio.to_thread(refresh_reference_caches, db)
             if settings.push_enabled:
                 result = await asyncio.to_thread(dispatch_market_price_alerts, db, settings)
                 if result["market_open_alerts_sent"] or result["stock_alerts_sent"]:
@@ -528,14 +566,10 @@ def public_market_leaders(
 
 
 @app.get("/public/market/news", response_model=list[MarketNewsOut], include_in_schema=False)
-def public_market_news(limit: int = Query(default=6, ge=1, le=20)) -> list[dict]:
+def public_market_news(limit: int = Query(default=6, ge=1, le=20), db: Session = Depends(get_db)) -> list[dict]:
     if not settings.ngxpulse_enabled:
         return []
-    try:
-        return fetch_market_news_cached(limit)
-    except NgxFetchError as exc:
-        logger.warning("Public market news fetch failed: %s", exc)
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return get_cached_market_news(db, limit)
 
 
 @app.get("/public/privacy-policy", include_in_schema=False, response_class=HTMLResponse)
@@ -912,12 +946,11 @@ def get_market_status(db: Session = Depends(get_db), _: User = Depends(get_curre
 
 
 @app.get("/market/snapshot", response_model=MarketSnapshotOut)
-def get_market_snapshot(_: User = Depends(get_current_user)) -> dict:
-    try:
-        return fetch_market_snapshot_cached()
-    except NgxFetchError as exc:
-        logger.warning("Market snapshot fetch failed: %s", exc)
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+def get_market_snapshot(db: Session = Depends(get_db), _: User = Depends(get_current_user)) -> dict:
+    snapshot = get_cached_market_snapshot(db)
+    if snapshot is None:
+        raise HTTPException(status_code=503, detail="Market snapshot is not available yet")
+    return snapshot
 
 
 @app.get("/market/leaders", response_model=MarketLeadersOut)
@@ -932,15 +965,12 @@ def get_market_leaders(
 @app.get("/market/news", response_model=list[MarketNewsOut])
 def get_market_news(
     limit: int = Query(default=6, ge=1, le=20),
+    db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ) -> list[dict]:
     if not settings.ngxpulse_enabled:
         return []
-    try:
-        return fetch_market_news_cached(limit)
-    except NgxFetchError as exc:
-        logger.warning("Market news fetch failed: %s", exc)
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return get_cached_market_news(db, limit)
 
 
 @app.get("/market/ideas", response_model=MarketIdeasOut)
@@ -986,11 +1016,7 @@ def get_stock_company_news(
     ngx_id = ensure_stock_ngx_id(db, stock)
     if not ngx_id:
         return []
-    try:
-        return fetch_company_news_cached(ngx_id)[:limit]
-    except NgxFetchError as exc:
-        logger.warning("Company news fetch failed for %s: %s", stock.symbol, exc)
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return get_cached_company_news(db, stock.symbol, ngx_id, limit)
 
 
 @app.get("/stocks/{symbol}/dividends", response_model=list[DividendHistoryOut])
@@ -1005,11 +1031,7 @@ def get_stock_dividends(
         raise HTTPException(status_code=404, detail="Stock not found")
     if not settings.ngxpulse_enabled:
         return []
-    try:
-        return fetch_dividend_history_cached(stock.symbol, limit)
-    except NgxFetchError as exc:
-        logger.warning("Dividend history fetch failed for %s: %s", stock.symbol, exc)
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return get_cached_dividend_history(db, stock.symbol, limit)
 
 
 @app.get("/stocks/{symbol}/disclosures", response_model=list[DisclosureOut])
@@ -1024,11 +1046,7 @@ def get_stock_disclosures(
         raise HTTPException(status_code=404, detail="Stock not found")
     if not settings.ngxpulse_enabled:
         return []
-    try:
-        return fetch_disclosures_cached(stock.symbol, limit)
-    except NgxFetchError as exc:
-        logger.warning("Disclosures fetch failed for %s: %s", stock.symbol, exc)
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return get_cached_disclosures(db, stock.symbol, limit)
 
 
 @app.get("/stocks/{symbol}/history", response_model=list[StockPriceOut])
@@ -1044,14 +1062,17 @@ def get_stock_history(
         raise HTTPException(status_code=404, detail="Stock not found")
 
     ngx_id = stock.ngx_id if settings.ngxpulse_enabled else ensure_stock_ngx_id(db, stock)
+    normalized_range = normalize_history_range(range)
     since, limit_trading_days = resolve_history_window(range_value=range, months=months)
     rows = stock_history_query(db, symbol, since, limit_trading_days)
-    if stock.supports_history and (
-        not rows
-        or any(row.open_price is None for row in rows)
-        or stock_history_is_stale(rows)
+    fetch_since = None if normalized_range == "all" else since
+    if stock.supports_history and stock_history_needs_backfill(
+        rows,
+        normalized_range=normalized_range,
+        since=since,
+        limit_trading_days=limit_trading_days,
     ):
-        upsert_stock_history(db, stock.symbol, ngx_id, since=since)
+        upsert_stock_history(db, stock.symbol, ngx_id, since=fetch_since)
         db.commit()
         rows = stock_history_query(db, symbol, since, limit_trading_days)
     return rows
@@ -1069,40 +1090,30 @@ def build_stock_detail(
         raise HTTPException(status_code=404, detail="Stock not found")
 
     ngx_id = ensure_stock_ngx_id(db, stock)
+    normalized_range = normalize_history_range(range)
     since, limit_trading_days = resolve_history_window(range_value=range, months=months)
     rows = stock_history_query(db, symbol, since, limit_trading_days)
-    if stock.supports_history and (
-        not rows or any(row.open_price is None for row in rows) or stock_history_is_stale(rows)
+    fetch_since = None if normalized_range == "all" else since
+    if stock.supports_history and stock_history_needs_backfill(
+        rows,
+        normalized_range=normalized_range,
+        since=since,
+        limit_trading_days=limit_trading_days,
     ):
-        upsert_stock_history(db, stock.symbol, ngx_id, since=since)
+        upsert_stock_history(db, stock.symbol, ngx_id, since=fetch_since)
         db.commit()
         db.refresh(stock)
         rows = stock_history_query(db, symbol, since, limit_trading_days)
 
-    market_snapshot = None
-    try:
-        market_snapshot = fetch_market_snapshot_cached()
-    except NgxFetchError as exc:
-        logger.warning("Market snapshot fetch failed for %s detail: %s", stock.symbol, exc)
+    market_snapshot = get_cached_market_snapshot(db)
 
-    news: list[dict] = []
-    if ngx_id:
-        try:
-            news = fetch_company_news_cached(ngx_id)[:news_limit]
-        except NgxFetchError as exc:
-            logger.warning("Company news fetch failed for %s detail: %s", stock.symbol, exc)
+    news = get_cached_company_news(db, stock.symbol, ngx_id, news_limit) if ngx_id else []
 
     dividends: list[dict] = []
     disclosures: list[dict] = []
     if settings.ngxpulse_enabled:
-        try:
-            dividends = fetch_dividend_history_cached(stock.symbol, 6)
-        except NgxFetchError as exc:
-            logger.warning("Dividend history fetch failed for %s detail: %s", stock.symbol, exc)
-        try:
-            disclosures = fetch_disclosures_cached(stock.symbol, news_limit)
-        except NgxFetchError as exc:
-            logger.warning("Disclosures fetch failed for %s detail: %s", stock.symbol, exc)
+        dividends = get_cached_dividend_history(db, stock.symbol, 10)
+        disclosures = get_cached_disclosures(db, stock.symbol, news_limit)
 
     return {
         "stock": stock,

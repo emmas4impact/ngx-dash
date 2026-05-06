@@ -104,6 +104,14 @@ class MarketStatus(TimestampMixin, Base):
     raw_payload: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class ApiCache(TimestampMixin, Base):
+    __tablename__ = "api_cache"
+
+    cache_key: Mapped[str] = mapped_column(String(255), primary_key=True)
+    source: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    payload: Mapped[str] = mapped_column(Text)
+
+
 class PortfolioHolding(TimestampMixin, Base):
     __tablename__ = "portfolio_holdings"
     __table_args__ = (UniqueConstraint("user_id", "stock_symbol", name="uq_portfolio_user_stock"),)
