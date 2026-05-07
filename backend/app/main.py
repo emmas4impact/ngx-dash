@@ -441,11 +441,16 @@ async def background_stock_sync_loop() -> None:
                 await asyncio.to_thread(refresh_reference_caches, db)
             if settings.push_enabled:
                 result = await asyncio.to_thread(dispatch_market_price_alerts, db, settings)
-                if result["market_open_alerts_sent"] or result["stock_alerts_sent"]:
+                if (
+                    result["market_open_alerts_sent"]
+                    or result["stock_alerts_sent"]
+                    or result["dividend_alerts_sent"]
+                ):
                     logger.info(
-                        "Sent %s market-open alerts and %s stock alerts to %s device tokens",
+                        "Sent %s market-open alerts, %s stock alerts, and %s dividend alerts to %s device tokens",
                         result["market_open_alerts_sent"],
                         result["stock_alerts_sent"],
+                        result["dividend_alerts_sent"],
                         result["tokens_sent"],
                     )
         except asyncio.CancelledError:

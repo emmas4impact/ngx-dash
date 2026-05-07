@@ -77,7 +77,7 @@ def stamp_web_entrypoint(version_name: str, build_number: str) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Build Flutter artifacts with a dotted display version like 1.0.12.72.",
+        description="Build Flutter artifacts with a three-part display version like 1.1.0.",
     )
     parser.add_argument(
         "command",
@@ -110,7 +110,7 @@ def main() -> None:
         f"--dart-define=APP_BUILD_NUMBER={build_number}",
     ]
 
-    print(f"Building version {version_name}.{build_number}")
+    print(f"Building version {version_name} (build {build_number})")
     result = subprocess.run(command, cwd=ROOT / "flutter_app", check=False)
     if result.returncode != 0:
         raise SystemExit(result.returncode)

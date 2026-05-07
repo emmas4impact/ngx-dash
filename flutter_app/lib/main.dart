@@ -25,13 +25,15 @@ const _webSessionDeadlineKey = 'web_session_deadline_ms';
 const _webSessionExtendedKey = 'web_session_extended';
 const _financialPrivacyPreferenceKey = 'financial_privacy_hidden';
 const _chartTypePreferenceKey = 'preferred_chart_type';
-const _seedColor = Color(0xFF00A86B);
-const _gainColor = Color(0xFF00B67A);
-const _lossColor = Color(0xFFFF5A7A);
-const _darkScaffold = Color(0xFF0B1215);
-const _darkSurface = Color(0xFF101A1E);
-const _darkSurfaceAlt = Color(0xFF142126);
-const _lightScaffold = Color(0xFFEDF2F7);
+const _marketIdeasFallbackDisclaimer =
+    'Stockfolio NG highlights data-driven watchlist ideas only. It is not a financial adviser app. Contact your broker for detailed analysis.';
+const _seedColor = Color(0xFF109E7A);
+const _gainColor = Color(0xFF00C16E);
+const _lossColor = Color(0xFFFF617D);
+const _darkScaffold = Color(0xFF101619);
+const _darkSurface = Color(0xFF162126);
+const _darkSurfaceAlt = Color(0xFF1A2B31);
+const _lightScaffold = Color(0xFFF3F8FB);
 
 String stockLogoUrl(String symbol) =>
     '$apiBaseUrl/public/stocks/${Uri.encodeComponent(symbol)}/logo';
@@ -403,22 +405,28 @@ class _NgxPortfolioAppState extends State<NgxPortfolioApp> {
           seedColor: _seedColor,
           brightness: Brightness.light,
         ).copyWith(
-          primary: const Color(0xFF007A68),
-          secondary: const Color(0xFF00A86B),
-          tertiary: const Color(0xFF145BFF),
+          primary: const Color(0xFF0A8F74),
+          secondary: const Color(0xFFFF8A5B),
+          tertiary: const Color(0xFF2B67F6),
+          primaryContainer: const Color(0xFFC8F5E4),
+          secondaryContainer: const Color(0xFFFFDFC7),
+          tertiaryContainer: const Color(0xFFDCE6FF),
           surface: Colors.white,
-          surfaceContainerHighest: const Color(0xFFE6F0ED),
+          surfaceContainerHighest: const Color(0xFFF1F7F4),
         );
     final darkScheme =
         ColorScheme.fromSeed(
           seedColor: _seedColor,
           brightness: Brightness.dark,
         ).copyWith(
-          primary: const Color(0xFF38E2A2),
-          secondary: const Color(0xFF68F0C0),
-          tertiary: const Color(0xFF69A7FF),
+          primary: const Color(0xFF5DEBB7),
+          secondary: const Color(0xFFFFA97A),
+          tertiary: const Color(0xFF8AB6FF),
+          primaryContainer: const Color(0xFF11493E),
+          secondaryContainer: const Color(0xFF5E3426),
+          tertiaryContainer: const Color(0xFF1C3B72),
           surface: _darkSurface,
-          surfaceContainerHighest: const Color(0xFF15262B),
+          surfaceContainerHighest: const Color(0xFF1A2B31),
         );
 
     return MaterialApp(
@@ -430,37 +438,37 @@ class _NgxPortfolioAppState extends State<NgxPortfolioApp> {
         colorScheme: lightScheme,
         scaffoldBackgroundColor: _lightScaffold,
         appBarTheme: const AppBarTheme(
-          backgroundColor: Color(0xFFE5F0EE),
-          foregroundColor: Color(0xFF10231D),
+          backgroundColor: Color(0xFFEAF8F3),
+          foregroundColor: Color(0xFF122A24),
           elevation: 0,
         ),
         navigationBarTheme: NavigationBarThemeData(
-          backgroundColor: const Color(0xFFF8FBFC),
-          indicatorColor: const Color(0xFFD3F3E5),
+          backgroundColor: const Color(0xFFFBFDFE),
+          indicatorColor: const Color(0xFFC8F5E4),
           iconTheme: WidgetStateProperty.resolveWith((states) {
             final selected = states.contains(WidgetState.selected);
             return IconThemeData(
               color: selected
-                  ? const Color(0xFF007A68)
-                  : const Color(0xFF445B57),
+                  ? const Color(0xFF0A8F74)
+                  : const Color(0xFF4A5F5C),
             );
           }),
           labelTextStyle: WidgetStateProperty.resolveWith((states) {
             final selected = states.contains(WidgetState.selected);
             return TextStyle(
               color: selected
-                  ? const Color(0xFF007A68)
-                  : const Color(0xFF445B57),
+                  ? const Color(0xFF0A8F74)
+                  : const Color(0xFF4A5F5C),
               fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
             );
           }),
         ),
         navigationRailTheme: const NavigationRailThemeData(
-          backgroundColor: Color(0xFFEAF4F1),
-          indicatorColor: Color(0xFFD3F3E5),
-          selectedIconTheme: IconThemeData(color: Color(0xFF007A68)),
+          backgroundColor: Color(0xFFEFF8F4),
+          indicatorColor: Color(0xFFC8F5E4),
+          selectedIconTheme: IconThemeData(color: Color(0xFF0A8F74)),
           selectedLabelTextStyle: TextStyle(
-            color: Color(0xFF007A68),
+            color: Color(0xFF0A8F74),
             fontWeight: FontWeight.w700,
           ),
         ),
@@ -473,7 +481,7 @@ class _NgxPortfolioAppState extends State<NgxPortfolioApp> {
           ),
           enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(18),
-            borderSide: const BorderSide(color: Color(0xFFD7E2DE)),
+            borderSide: const BorderSide(color: Color(0xFFD6E5E2)),
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(18),
@@ -492,7 +500,7 @@ class _NgxPortfolioAppState extends State<NgxPortfolioApp> {
           elevation: 0,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.all(Radius.circular(24)),
-            side: BorderSide(color: Color(0xFFD9E5EC)),
+            side: BorderSide(color: Color(0xFFD9E8EE)),
           ),
         ),
       ),
@@ -502,38 +510,38 @@ class _NgxPortfolioAppState extends State<NgxPortfolioApp> {
         scaffoldBackgroundColor: _darkScaffold,
         canvasColor: _darkScaffold,
         appBarTheme: const AppBarTheme(
-          backgroundColor: Color(0xFF121C20),
-          foregroundColor: Color(0xFFE6F4EF),
+          backgroundColor: Color(0xFF162025),
+          foregroundColor: Color(0xFFF0FAF5),
           elevation: 0,
         ),
         navigationBarTheme: NavigationBarThemeData(
-          backgroundColor: const Color(0xFF10181C),
-          indicatorColor: const Color(0xFF114639),
+          backgroundColor: const Color(0xFF121A1E),
+          indicatorColor: const Color(0xFF134C40),
           iconTheme: WidgetStateProperty.resolveWith((states) {
             final selected = states.contains(WidgetState.selected);
             return IconThemeData(
               color: selected
-                  ? const Color(0xFF68F0C0)
-                  : const Color(0xFF91ABA3),
+                  ? const Color(0xFF73F3C5)
+                  : const Color(0xFF9AB0A9),
             );
           }),
           labelTextStyle: WidgetStateProperty.resolveWith((states) {
             final selected = states.contains(WidgetState.selected);
             return TextStyle(
               color: selected
-                  ? const Color(0xFF68F0C0)
-                  : const Color(0xFF92AAA4),
+                  ? const Color(0xFF73F3C5)
+                  : const Color(0xFF9AB0A9),
               fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
             );
           }),
         ),
         navigationRailTheme: const NavigationRailThemeData(
-          backgroundColor: Color(0xFF10181C),
-          indicatorColor: Color(0xFF114639),
-          selectedIconTheme: IconThemeData(color: Color(0xFF68F0C0)),
+          backgroundColor: Color(0xFF121A1E),
+          indicatorColor: Color(0xFF134C40),
+          selectedIconTheme: IconThemeData(color: Color(0xFF73F3C5)),
           unselectedIconTheme: IconThemeData(color: Color(0xFF9DB1AB)),
           selectedLabelTextStyle: TextStyle(
-            color: Color(0xFF68F0C0),
+            color: Color(0xFF73F3C5),
             fontWeight: FontWeight.w700,
           ),
           unselectedLabelTextStyle: TextStyle(color: Color(0xFF9DB1AB)),
@@ -4305,9 +4313,7 @@ class VersionLabel extends StatelessWidget {
         builder: (context, snapshot) {
           final info = snapshot.data;
           final packageVersion =
-              info == null || info.version.isEmpty || info.buildNumber.isEmpty
-              ? null
-              : '${info.version}.${info.buildNumber}';
+              info == null || info.version.isEmpty ? null : info.version;
           final version = packageVersion ?? appDisplayVersion;
           final text = '$platformLabel $version';
           if (compact) {
@@ -4801,8 +4807,31 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     );
                   }
+                  if (ideasSnapshot.hasError) {
+                    return MarketIdeasPanel(
+                      bundle: MarketIdeasBundle(
+                        disclaimer: _marketIdeasFallbackDisclaimer,
+                        generatedAt: DateTime.now(),
+                        ideas: const [],
+                        stocksAnalyzed: 0,
+                      ),
+                      emptyMessage:
+                          'Potential buy setups are temporarily unavailable. Pull to refresh after the next market sync.',
+                    );
+                  }
                   if (ideas == null || ideas.ideas.isEmpty) {
-                    return const SizedBox.shrink();
+                    return MarketIdeasPanel(
+                      bundle:
+                          ideas ??
+                          MarketIdeasBundle(
+                            disclaimer: _marketIdeasFallbackDisclaimer,
+                            generatedAt: DateTime.now(),
+                            ideas: const [],
+                            stocksAnalyzed: 0,
+                          ),
+                      emptyMessage:
+                          'No setups are standing out right now, but this panel stays here and refreshes with the next sync.',
+                    );
                   }
                   return MarketIdeasPanel(bundle: ideas);
                 },
@@ -8677,9 +8706,14 @@ class _LeaderTickerChip extends StatelessWidget {
 }
 
 class MarketIdeasPanel extends StatelessWidget {
-  const MarketIdeasPanel({super.key, required this.bundle});
+  const MarketIdeasPanel({
+    super.key,
+    required this.bundle,
+    this.emptyMessage,
+  });
 
   final MarketIdeasBundle bundle;
+  final String? emptyMessage;
 
   @override
   Widget build(BuildContext context) {
@@ -8727,14 +8761,58 @@ class MarketIdeasPanel extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 14),
-            ...bundle.ideas.map(
+            if (bundle.ideas.isEmpty)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      theme.colorScheme.primaryContainer.withValues(alpha: 0.9),
+                      theme.colorScheme.secondaryContainer.withValues(alpha: 0.72),
+                    ],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(
+                    color: theme.colorScheme.primary.withValues(alpha: 0.12),
+                  ),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      Icons.auto_graph_rounded,
+                      color: theme.colorScheme.primary,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        emptyMessage ??
+                            'Potential buy setups will appear here as soon as the synced market data surfaces a strong candidate.',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              )
+            else
+              ...bundle.ideas.map(
               (idea) => Padding(
                 padding: const EdgeInsets.only(bottom: 12),
                 child: Container(
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
-                    color: theme.colorScheme.surfaceContainerHighest.withValues(
-                      alpha: 0.28,
+                    gradient: LinearGradient(
+                      colors: [
+                        theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.92),
+                        theme.colorScheme.primaryContainer.withValues(alpha: 0.2),
+                      ],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
                     ),
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(color: theme.colorScheme.outlineVariant),
@@ -8774,7 +8852,12 @@ class MarketIdeasPanel extends StatelessWidget {
                               vertical: 6,
                             ),
                             decoration: BoxDecoration(
-                              color: theme.colorScheme.primaryContainer,
+                              gradient: LinearGradient(
+                                colors: [
+                                  theme.colorScheme.primaryContainer,
+                                  theme.colorScheme.secondaryContainer,
+                                ],
+                              ),
                               borderRadius: BorderRadius.circular(999),
                             ),
                             child: Text(
@@ -8799,10 +8882,10 @@ class MarketIdeasPanel extends StatelessWidget {
                                   vertical: 6,
                                 ),
                                 decoration: BoxDecoration(
-                                  color: theme.colorScheme.surface,
+                                  color: theme.colorScheme.surface.withValues(alpha: 0.96),
                                   borderRadius: BorderRadius.circular(999),
                                   border: Border.all(
-                                    color: theme.colorScheme.outlineVariant,
+                                    color: theme.colorScheme.secondary.withValues(alpha: 0.22),
                                   ),
                                 ),
                                 child: Text(

@@ -9,7 +9,7 @@ from google.oauth2 import service_account
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
-from .models import MarketStatus, PushDeviceToken, Stock, SyncLog, User
+from .models import ApiCache, MarketStatus, PushDeviceToken, Stock, SyncLog, User
 from .settings import Settings
 
 
@@ -207,6 +207,91 @@ def _is_live_market_session(now: datetime | None = None) -> bool:
     return market_open <= wat_now.time() <= market_close
 
 
+def _dividend_event_today(record: dict, today: date) -> tuple[str, str] | None:
+    today_iso = today.isoformat()
+    event_fields = [
+        ("pay_date", "payout"),
+        ("record_date", "record"),
+        ("ex_dividend_date", "ex-dividend"),
+    ]
+    for field_name, label in event_fields:
+        field_value = record.get(field_name)
+        if field_value == today_iso:
+            return field_name, label
+    return None
+
+
+def _dispatch_dividend_alerts(db: Session, settings: Settings, devices: list[PushDeviceToken]) -> tuple[int, int]:
+    today = _current_wat().date()
+    caches = db.scalars(
+        select(ApiCache).where(ApiCache.cache_key.like("dividends:%"))
+    ).all()
+    alerts_sent = 0
+    tokens_sent = 0
+
+    for cache_entry in caches:
+        try:
+            payload = json.loads(cache_entry.payload)
+        except ValueError:
+            continue
+        if not isinstance(payload, list):
+            continue
+
+        today_record: dict | None = None
+        event_label: str | None = None
+        event_field: str | None = None
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            event = _dividend_event_today(item, today)
+            if event is None:
+                continue
+            event_field, event_label = event
+            today_record = item
+            break
+
+        if today_record is None or event_label is None or event_field is None:
+            continue
+
+        symbol = str(today_record.get("symbol") or "").strip().upper()
+        if not symbol:
+            continue
+        source = f"dividend_push:{today.isoformat()}:{symbol}:{event_field}"
+        if _sync_log_exists(db, source):
+            continue
+
+        amount = today_record.get("dividend_per_share")
+        amount_text = ""
+        if isinstance(amount, (int, float)):
+            currency = str(today_record.get("currency") or "NGN").strip() or "NGN"
+            amount_text = f" {currency} {float(amount):,.2f}"
+
+        title = f"{symbol} dividend event is today"
+        body = (
+            f"{symbol} {event_label} date lands today.{amount_text} "
+            "Check the latest news on the shares in Stockfolio NG."
+        )
+        delivered = _deliver_push_bundle(
+            db,
+            settings,
+            devices,
+            title=title,
+            body=body,
+            data={
+                "type": "dividend_alert",
+                "route": "stocks",
+                "symbol": symbol,
+                "event_type": event_field,
+            },
+        )
+        if delivered:
+            _record_push_log(db, source, f"Delivered {symbol} dividend alert to {delivered} device(s).")
+            alerts_sent += 1
+            tokens_sent += delivered
+
+    return alerts_sent, tokens_sent
+
+
 def _deliver_push_bundle(
     db: Session,
     settings: Settings,
@@ -246,10 +331,16 @@ def dispatch_market_price_alerts(db: Session, settings: Settings) -> dict[str, i
         select(PushDeviceToken).where(PushDeviceToken.notifications_enabled.is_(True))
     ).all()
     if not devices:
-        return {"market_open_alerts_sent": 0, "stock_alerts_sent": 0, "tokens_sent": 0}
+        return {
+            "market_open_alerts_sent": 0,
+            "stock_alerts_sent": 0,
+            "dividend_alerts_sent": 0,
+            "tokens_sent": 0,
+        }
 
     market_open_alerts_sent = 0
     stock_alerts_sent = 0
+    dividend_alerts_sent = 0
     tokens_sent = 0
 
     today = date.today().isoformat()
@@ -279,8 +370,21 @@ def dispatch_market_price_alerts(db: Session, settings: Settings) -> dict[str, i
                 market_open_alerts_sent = 1
                 tokens_sent += delivered
 
+    dividend_alerts_sent, dividend_tokens = _dispatch_dividend_alerts(
+        db,
+        settings,
+        devices,
+    )
+    tokens_sent += dividend_tokens
+
     if not market_is_live:
-        return {"market_open_alerts_sent": 0, "stock_alerts_sent": 0, "tokens_sent": 0}
+        db.commit()
+        return {
+            "market_open_alerts_sent": 0,
+            "stock_alerts_sent": 0,
+            "dividend_alerts_sent": dividend_alerts_sent,
+            "tokens_sent": tokens_sent,
+        }
 
     movers = db.scalars(
         select(Stock)
@@ -329,5 +433,6 @@ def dispatch_market_price_alerts(db: Session, settings: Settings) -> dict[str, i
     return {
         "market_open_alerts_sent": market_open_alerts_sent,
         "stock_alerts_sent": stock_alerts_sent,
+        "dividend_alerts_sent": dividend_alerts_sent,
         "tokens_sent": tokens_sent,
     }
