@@ -5890,7 +5890,11 @@ class HoldingTile extends StatelessWidget {
                           value: holding.quantity.toStringAsFixed(2),
                         ),
                         StockDetailValue(
-                          label: 'Value',
+                          label: 'Invested',
+                          value: moneyFormat.format(holding.totalCost),
+                        ),
+                        StockDetailValue(
+                          label: 'Current value',
                           value: moneyFormat.format(holding.totalValue),
                         ),
                         StockDetailValue(
@@ -5922,7 +5926,18 @@ class HoldingTile extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    Text(moneyFormat.format(holding.totalValue)),
+                    Text(
+                      moneyFormat.format(holding.totalValue),
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    Text(
+                      'Invested ${moneyFormat.format(holding.totalCost)}',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
                     Text(
                       '${holding.profitLossPercent?.toStringAsFixed(2) ?? '0.00'}%',
                       style: TextStyle(
@@ -6107,6 +6122,19 @@ class PortfolioHoldingDetail extends StatelessWidget {
                   spacing: 10,
                   runSpacing: 10,
                   children: [
+                    StockDetailValue(
+                      label: 'Amount invested',
+                      value: moneyFormat.format(holding!.totalCost),
+                    ),
+                    StockDetailValue(
+                      label: 'Current value',
+                      value: moneyFormat.format(holding!.totalValue),
+                    ),
+                    StockDetailValue(
+                      label: 'Unrealized P/L',
+                      value: moneyFormat.format(holding!.profitLoss),
+                      positive: holding!.profitLoss >= 0,
+                    ),
                     StockDetailValue(
                       label: 'Current',
                       value: stock?.lastPrice == null
