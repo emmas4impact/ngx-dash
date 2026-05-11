@@ -9,7 +9,9 @@ from dateutil.relativedelta import relativedelta
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
+from pydantic import ValidationError
 from sqlalchemy import desc, func, select, text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload
 
 from .auth import create_access_token, get_current_superuser, get_current_user, hash_password, verify_password
@@ -151,7 +153,11 @@ def intraday_leader_payload(stock: Stock) -> dict | None:
 
     change = current_price - opening_price
     percent_change = (change / opening_price) * 100
-    payload = StockOut.model_validate(stock).model_dump()
+    try:
+        payload = StockOut.model_validate(stock).model_dump()
+    except ValidationError as exc:
+        logger.warning("Leader StockOut validation failed for %s: %s", stock.symbol, exc)
+        return None
     payload["change"] = change
     payload["percent_change"] = percent_change
     return payload
@@ -163,19 +169,30 @@ def intraday_leader_payload_from_dict(stock: dict) -> dict | None:
     if current_price is None or opening_price is None or opening_price <= 0:
         return None
 
-    payload = dict(stock)
-    payload["change"] = current_price - opening_price
-    payload["percent_change"] = (payload["change"] / opening_price) * 100
-    payload.setdefault("source", "ngx_doclib_live")
+    change = current_price - opening_price
+    percent_change = (change / opening_price) * 100
+    try:
+        payload = StockOut.model_validate(stock).model_dump()
+    except ValidationError as exc:
+        sym = stock.get("symbol") or stock.get("SYMBOL") or "?"
+        logger.warning("Leader StockOut validation failed for live row %s: %s", sym, exc)
+        return None
+    payload["change"] = change
+    payload["percent_change"] = percent_change
+    payload.setdefault("source", stock.get("source") or "ngx_doclib_live")
     return payload
 
 
 def market_leaders_payload(db: Session, limit: int) -> dict:
-    stocks = db.scalars(
-        select(Stock)
-        .where(Stock.last_price.is_not(None), Stock.open_price.is_not(None))
-        .order_by(Stock.symbol)
-    ).all()
+    try:
+        stocks = db.scalars(
+            select(Stock)
+            .where(Stock.last_price.is_not(None), Stock.open_price.is_not(None))
+            .order_by(Stock.symbol)
+        ).all()
+    except SQLAlchemyError as exc:
+        logger.warning("market_leaders: stock query failed (%s); using live fallback only.", exc)
+        stocks = []
     ranked = [payload for stock in stocks if (payload := intraday_leader_payload(stock)) is not None]
     if len(ranked) < max(2, limit):
         try:
@@ -189,10 +206,16 @@ def market_leaders_payload(db: Session, limit: int) -> dict:
         else:
             if live_ranked:
                 ranked = live_ranked
-    ranked.sort(key=lambda item: (item["percent_change"], item["symbol"]), reverse=True)
+    ranked.sort(
+        key=lambda item: (float(item.get("percent_change") or 0), str(item.get("symbol") or "")),
+        reverse=True,
+    )
     return {
         "top_movers": ranked[:limit],
-        "top_losers": sorted(ranked, key=lambda item: (item["percent_change"], item["symbol"]))[:limit],
+        "top_losers": sorted(
+            ranked,
+            key=lambda item: (float(item.get("percent_change") or 0), str(item.get("symbol") or "")),
+        )[:limit],
     }
 
 
@@ -226,13 +249,17 @@ def _turnover_score_component(turn: float | None, sorted_turnovers: list[float])
 
 
 def market_ideas_payload(db: Session, limit: int) -> dict:
-    stocks = list(
-        db.scalars(
-            select(Stock)
-            .where(Stock.last_price.is_not(None), Stock.open_price.is_not(None))
-            .order_by(Stock.symbol)
-        ).all()
-    )
+    try:
+        stocks = list(
+            db.scalars(
+                select(Stock)
+                .where(Stock.last_price.is_not(None), Stock.open_price.is_not(None))
+                .order_by(Stock.symbol)
+            ).all()
+        )
+    except SQLAlchemyError as exc:
+        logger.warning("market_ideas: stock query failed (%s); returning empty ideas.", exc)
+        stocks = []
     if not stocks:
         return {
             "disclaimer": MARKET_IDEAS_DISCLAIMER,
@@ -363,9 +390,15 @@ def market_ideas_payload(db: Session, limit: int) -> dict:
                 "and cap/shares vs price when available—not investment advice."
             )
 
+        try:
+            stock_dump = StockOut.model_validate(stock).model_dump()
+        except ValidationError as exc:
+            logger.warning("market_ideas: skip %s - StockOut validation failed: %s", stock.symbol, exc)
+            continue
+
         candidates.append(
             {
-                "stock": StockOut.model_validate(stock).model_dump(),
+                "stock": stock_dump,
                 "score": round(score, 2),
                 "one_year_growth_percent": None if one_year_growth_percent is None else round(one_year_growth_percent, 2),
                 "stocks_analyzed": len(stocks),
