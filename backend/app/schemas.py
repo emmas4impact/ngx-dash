@@ -91,6 +91,8 @@ class StockOut(BaseModel):
     low_price: float | None = None
     volume: float | None = None
     market_cap: float | None = None
+    shares_outstanding: float | None = None
+    pe_ratio: float | None = None
     change: float | None = None
     percent_change: float | None = None
     margin: float | None = None

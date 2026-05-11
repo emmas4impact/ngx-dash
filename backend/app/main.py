@@ -206,6 +206,25 @@ def _percentile(sorted_values: list[float], value: float | None) -> float:
     return less_or_equal / len(sorted_values)
 
 
+def _turnover_ratio(volume: float | None, price: float | None, cap: float | None) -> float | None:
+    if volume is None or price is None or cap is None or cap <= 0:
+        return None
+    return (float(volume) * float(price)) / float(cap)
+
+
+def _pe_value_score(pe: float | None, sorted_pe: list[float]) -> float:
+    if pe is None or pe <= 0 or pe > 250 or not sorted_pe:
+        return 0.0
+    pct = _percentile(sorted_pe, pe)
+    return max(0.0, (1.0 - pct)) * 14.0
+
+
+def _turnover_score_component(turn: float | None, sorted_turnovers: list[float]) -> float:
+    if turn is None or not sorted_turnovers:
+        return 0.0
+    return _percentile(sorted_turnovers, turn) * 10.0
+
+
 def market_ideas_payload(db: Session, limit: int) -> dict:
     stocks = list(
         db.scalars(
@@ -244,6 +263,19 @@ def market_ideas_payload(db: Session, limit: int) -> dict:
     market_caps = sorted(
         float(stock.market_cap) for stock in stocks if stock.market_cap is not None and float(stock.market_cap) > 0
     )
+    sorted_pe = sorted(
+        float(s.pe_ratio) for s in stocks if s.pe_ratio is not None and 0 < float(s.pe_ratio) < 300
+    )
+    turnover_values: list[float] = []
+    for s in stocks:
+        tr = _turnover_ratio(
+            float(s.volume) if s.volume is not None else None,
+            float(s.last_price) if s.last_price is not None else None,
+            float(s.market_cap) if s.market_cap is not None else None,
+        )
+        if tr is not None:
+            turnover_values.append(tr)
+    sorted_turnovers = sorted(turnover_values)
 
     candidates: list[dict] = []
     for stock in stocks:
@@ -265,13 +297,36 @@ def market_ideas_payload(db: Session, limit: int) -> dict:
         if growth_tuple is not None and growth_tuple[0] > 0:
             one_year_growth_percent = ((growth_tuple[1] - growth_tuple[0]) / growth_tuple[0]) * 100
 
+        pe_ratio_val = float(stock.pe_ratio) if stock.pe_ratio is not None else None
+        pe_component = _pe_value_score(pe_ratio_val, sorted_pe)
+        turn = _turnover_ratio(
+            float(stock.volume) if stock.volume is not None else None,
+            current_price,
+            float(stock.market_cap) if stock.market_cap is not None else None,
+        )
+        turnover_component = _turnover_score_component(turn, sorted_turnovers)
+
+        alignment_bonus = 0.0
+        if (
+            stock.shares_outstanding is not None
+            and float(stock.shares_outstanding) > 0
+            and stock.market_cap is not None
+            and float(stock.market_cap) > 0
+        ):
+            implied = float(stock.market_cap) / float(stock.shares_outstanding)
+            if current_price > 0:
+                rel = abs(implied - current_price) / current_price
+                if rel < 0.05:
+                    alignment_bonus = 2.5
+
         score = max(0.0, min(intraday_change, 10.0)) * 4.0
-        score += volume_score * 25.0
-        score += market_cap_score * 15.0
+        score += volume_score * 22.0
+        score += market_cap_score * 12.0
         score += margin_score * 10.0
         score += close_strength * 10.0
         if one_year_growth_percent is not None:
             score += max(-10.0, min(one_year_growth_percent, 40.0)) * 0.7
+        score += pe_component + turnover_component + alignment_bonus
 
         rationale: list[str] = []
         if intraday_change > 0:
@@ -286,8 +341,27 @@ def market_ideas_payload(db: Session, limit: int) -> dict:
             rationale.append(f"Margin is relatively tight at {margin_value:.2f}%.")
         if close_strength > 0:
             rationale.append("Current price is holding above the previous close.")
+        if pe_ratio_val is not None and pe_ratio_val > 0 and sorted_pe:
+            rationale.append(
+                f"P/E near {pe_ratio_val:.1f} (lower vs this NGX batch tilts naive value score upward)."
+            )
+        if turn is not None and sorted_turnovers and _percentile(sorted_turnovers, turn) >= 0.7:
+            rationale.append("Dollar turnover versus market cap is elevated versus the synced batch.")
+        if alignment_bonus > 0:
+            rationale.append("Last price aligns with market cap divided by listed shares (sanity check).")
         if stock.sector:
             rationale.append(f"Sector: {stock.sector}.")
+
+        if sorted_pe:
+            fund_note = (
+                "Scores blend momentum, liquidity, size, optional P/E vs the synced NGX batch, "
+                "and cap/shares price sanity—not investment advice."
+            )
+        else:
+            fund_note = (
+                "P/E missing for most synced names; tilt uses liquidity, size, momentum, "
+                "and cap/shares vs price when available—not investment advice."
+            )
 
         candidates.append(
             {
@@ -295,11 +369,11 @@ def market_ideas_payload(db: Session, limit: int) -> dict:
                 "score": round(score, 2),
                 "one_year_growth_percent": None if one_year_growth_percent is None else round(one_year_growth_percent, 2),
                 "stocks_analyzed": len(stocks),
-                "rationale": rationale[:4],
+                "rationale": rationale[:5],
                 "web_summary": None,
-                "price_to_earnings_ratio": None,
+                "price_to_earnings_ratio": None if pe_ratio_val is None else round(pe_ratio_val, 2),
                 "price_to_book_ratio": None,
-                "fundamental_note": "P/E and P/B ratios are not yet available from the current synced source.",
+                "fundamental_note": fund_note,
                 "ngx_id": stock.ngx_id,
             }
         )
@@ -513,6 +587,10 @@ def ensure_runtime_schema() -> None:
                 """
             )
         )
+        conn.execute(
+            text("ALTER TABLE stocks ADD COLUMN IF NOT EXISTS shares_outstanding NUMERIC(24, 2)")
+        )
+        conn.execute(text("ALTER TABLE stocks ADD COLUMN IF NOT EXISTS pe_ratio NUMERIC(14, 4)"))
 
 
 @app.on_event("startup")

@@ -33,7 +33,7 @@ const _lossColor = Color(0xFFFF617D);
 const _darkScaffold = Color(0xFF101619);
 const _darkSurface = Color(0xFF162126);
 const _darkSurfaceAlt = Color(0xFF1A2B31);
-const _lightScaffold = Color(0xFFF3F8FB);
+const _lightScaffold = Color(0xFFF4F6F9);
 
 String stockLogoUrl(String symbol) =>
     '$apiBaseUrl/public/stocks/${Uri.encodeComponent(symbol)}/logo';
@@ -201,7 +201,7 @@ MarketStatusPalette marketStatusPalette(
 
 Color chartGridColor(ThemeData theme) => theme.brightness == Brightness.dark
     ? Colors.white.withValues(alpha: 0.09)
-    : theme.colorScheme.outlineVariant.withValues(alpha: 0.55);
+    : theme.colorScheme.outlineVariant.withValues(alpha: 0.38);
 
 class ChartAxisScale {
   const ChartAxisScale({
@@ -438,12 +438,14 @@ class _NgxPortfolioAppState extends State<NgxPortfolioApp> {
         colorScheme: lightScheme,
         scaffoldBackgroundColor: _lightScaffold,
         appBarTheme: const AppBarTheme(
-          backgroundColor: Color(0xFFEAF8F3),
-          foregroundColor: Color(0xFF122A24),
+          backgroundColor: Color(0xFFFFFFFF),
+          foregroundColor: Color(0xFF0F172A),
           elevation: 0,
+          surfaceTintColor: Colors.transparent,
+          shadowColor: Colors.transparent,
         ),
         navigationBarTheme: NavigationBarThemeData(
-          backgroundColor: const Color(0xFFFBFDFE),
+          backgroundColor: const Color(0xFFFFFFFF),
           indicatorColor: const Color(0xFFC8F5E4),
           iconTheme: WidgetStateProperty.resolveWith((states) {
             final selected = states.contains(WidgetState.selected);
@@ -498,9 +500,11 @@ class _NgxPortfolioAppState extends State<NgxPortfolioApp> {
         ),
         cardTheme: const CardThemeData(
           elevation: 0,
+          color: Color(0xFFFFFFFF),
+          surfaceTintColor: Colors.transparent,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.all(Radius.circular(24)),
-            side: BorderSide(color: Color(0xFFD9E8EE)),
+            borderRadius: BorderRadius.all(Radius.circular(16)),
+            side: BorderSide(color: Color(0xFFE2E8F0)),
           ),
         ),
       ),
@@ -1261,6 +1265,8 @@ class Stock {
     this.margin,
     this.volume,
     this.marketCap,
+    this.peRatio,
+    this.sharesOutstanding,
     this.sector,
     this.ngxId,
     this.supportsHistory = false,
@@ -1276,6 +1282,8 @@ class Stock {
   final double? margin;
   final double? volume;
   final double? marketCap;
+  final double? peRatio;
+  final double? sharesOutstanding;
   final String? sector;
   final String? ngxId;
   final bool supportsHistory;
@@ -1294,6 +1302,8 @@ class Stock {
       margin: asDouble(json['margin']),
       volume: asDouble(json['volume']),
       marketCap: asDouble(json['market_cap']),
+      peRatio: asDouble(json['pe_ratio']),
+      sharesOutstanding: asDouble(json['shares_outstanding']),
       sector: json['sector'] as String?,
       ngxId: json['ngx_id'] as String?,
       supportsHistory: json['supports_history'] == true,
@@ -8896,6 +8906,28 @@ class MarketIdeasPanel extends StatelessWidget {
                               ),
                             ),
                           ),
+                          if (idea.priceToEarningsRatio != null &&
+                              idea.priceToEarningsRatio!.isFinite &&
+                              idea.priceToEarningsRatio! > 0)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 6,
+                              ),
+                              decoration: BoxDecoration(
+                                color: theme.colorScheme.surface,
+                                borderRadius: BorderRadius.circular(999),
+                                border: Border.all(
+                                  color: theme.colorScheme.outlineVariant,
+                                ),
+                              ),
+                              child: Text(
+                                'P/E ${idea.priceToEarningsRatio!.toStringAsFixed(1)}',
+                                style: theme.textTheme.labelMedium?.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
                         ],
                       ),
                       const SizedBox(height: 10),
@@ -9173,8 +9205,96 @@ List<PricePoint> chartDisplayPoints(
   }).toList();
 }
 
-Set<int> chartBottomLabelIndices(List<PricePoint> points, PriceChartType type) {
-  if (points.isEmpty) return const <int>{};
+/// First day of each calendar month from [first] through [last] (inclusive).
+List<DateTime> _monthStartsInDataSpan(DateTime first, DateTime last) {
+  final months = <DateTime>[];
+  var y = first.year;
+  var m = first.month;
+  final endKey = last.year * 12 + last.month;
+  while (true) {
+    final key = y * 12 + m;
+    if (key > endKey) {
+      break;
+    }
+    months.add(DateTime(y, m));
+    m++;
+    if (m > 12) {
+      m = 1;
+      y++;
+    }
+    if (months.length > 48) {
+      break;
+    }
+  }
+  return months;
+}
+
+int _firstIndexOnOrAfterMonthStart(List<PricePoint> points, DateTime monthStart) {
+  for (var i = 0; i < points.length; i++) {
+    final d = points[i].date;
+    if (!d.isBefore(monthStart)) {
+      return i;
+    }
+  }
+  return points.length - 1;
+}
+
+Set<int> _calendarChartBottomLabelIndices(List<PricePoint> points, String rangeLabel) {
+  if (points.isEmpty) {
+    return const <int>{};
+  }
+  if (points.length < 2) {
+    return {0};
+  }
+  final first = points.first.date;
+  final last = points.last.date;
+  var monthStarts = _monthStartsInDataSpan(first, last);
+  final maxMonths = rangeLabel == '6M' ? 6 : 12;
+  if (monthStarts.length > maxMonths) {
+    monthStarts = monthStarts.sublist(monthStarts.length - maxMonths);
+  }
+  final maxTicks = rangeLabel == '6M' ? 6 : 8;
+  if (monthStarts.length > maxTicks) {
+    final step = max(1, ((monthStarts.length - 1) / (maxTicks - 1)).ceil());
+    final picked = <DateTime>[monthStarts.first];
+    for (var i = step; i < monthStarts.length - 1; i += step) {
+      picked.add(monthStarts[i]);
+    }
+    if (picked.last != monthStarts.last) {
+      picked.add(monthStarts.last);
+    }
+    monthStarts = picked;
+  }
+  final fmt = (rangeLabel == '1Y' || first.year != last.year)
+      ? DateFormat('MMM yy')
+      : DateFormat.MMM();
+  final indices = <int>{};
+  final seen = <String>{};
+  for (final ms in monthStarts) {
+    final idx = _firstIndexOnOrAfterMonthStart(points, ms);
+    final label = fmt.format(ms);
+    if (seen.contains(label)) {
+      continue;
+    }
+    seen.add(label);
+    indices.add(idx);
+  }
+  return indices;
+}
+
+Set<int> chartBottomLabelIndices(
+  List<PricePoint> points,
+  PriceChartType type,
+  String? rangeLabel,
+) {
+  if (points.isEmpty) {
+    return const <int>{};
+  }
+  final useCalendarAxis =
+      (rangeLabel == '6M' || rangeLabel == '1Y') && type != PriceChartType.bar;
+  if (useCalendarAxis) {
+    return _calendarChartBottomLabelIndices(points, rangeLabel!);
+  }
   if (type != PriceChartType.bar && points.length <= 12) {
     return {for (var i = 0; i < points.length; i++) i};
   }
@@ -9260,6 +9380,7 @@ class _PriceChartState extends State<PriceChart> {
     final bottomLabelIndices = chartBottomLabelIndices(
       displayPoints,
       selectedType,
+      widget.rangeLabel,
     );
     final theme = Theme.of(context);
     final values = [
@@ -9325,6 +9446,9 @@ class _PriceChartState extends State<PriceChart> {
     );
     final useMonthlyBarLabels =
         selectedType == PriceChartType.bar && displayPoints.length != widget.points.length;
+    final useCalendarMonthAxis =
+        (widget.rangeLabel == '6M' || widget.rangeLabel == '1Y') &&
+            selectedType != PriceChartType.bar;
     final barWidth = displayPoints.length > 60
         ? 8.0
         : displayPoints.length > 24
@@ -9334,6 +9458,15 @@ class _PriceChartState extends State<PriceChart> {
     String chartDateLabel(DateTime value) {
       if (useMonthlyBarLabels) {
         return DateFormat('MMM yy').format(value);
+      }
+      if (useCalendarMonthAxis) {
+        final spanStart = displayPoints.first.date;
+        final spanEnd = displayPoints.last.date;
+        final crossesYear = spanStart.year != spanEnd.year;
+        if (widget.rangeLabel == '1Y' || crossesYear) {
+          return DateFormat('MMM yy').format(value);
+        }
+        return DateFormat.MMM().format(value);
       }
       return showYearOnAxis
           ? DateFormat('MMM yy').format(value)

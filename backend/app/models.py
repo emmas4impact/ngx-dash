@@ -54,6 +54,8 @@ class Stock(TimestampMixin, Base):
     low_price: Mapped[float | None] = mapped_column(Numeric(18, 4), nullable=True)
     volume: Mapped[float | None] = mapped_column(Numeric(20, 2), nullable=True)
     market_cap: Mapped[float | None] = mapped_column(Numeric(24, 2), nullable=True)
+    shares_outstanding: Mapped[float | None] = mapped_column(Numeric(24, 2), nullable=True)
+    pe_ratio: Mapped[float | None] = mapped_column(Numeric(14, 4), nullable=True)
     change: Mapped[float | None] = mapped_column(Numeric(18, 4), nullable=True)
     percent_change: Mapped[float | None] = mapped_column(Numeric(10, 4), nullable=True)
     margin: Mapped[float | None] = mapped_column(Numeric(10, 4), nullable=True)

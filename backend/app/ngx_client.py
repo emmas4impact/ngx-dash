@@ -221,6 +221,27 @@ def normalize_stock(raw: dict[str, Any], source: str) -> dict[str, Any] | None:
     if margin is None and high_price is not None and low_price is not None and last_price:
         margin = ((high_price - low_price) / last_price) * 100
 
+    shares_outstanding = _number(
+        _first(raw, ["shares_outstanding", "sharesOutstanding", "SharesOutstanding", "listed_shares"])
+    )
+    pe_ratio = _number(
+        _first(
+            raw,
+            [
+                "pe_ratio",
+                "peRatio",
+                "PE",
+                "p_e",
+                "price_earnings",
+                "priceEarnings",
+                "priceEarningsRatio",
+                "trailing_pe",
+                "ttm_pe",
+                "PERatio",
+            ],
+        )
+    )
+
     reference_price = previous_close if previous_close not in (None, 0) else open_price
     computed_change: float | None = None
     computed_percent_change: float | None = None
@@ -249,11 +270,13 @@ def normalize_stock(raw: dict[str, Any], source: str) -> dict[str, Any] | None:
         "high_price": high_price,
         "low_price": low_price,
         "volume": _number(_first(raw, ["Volume", "volume"])),
+        "shares_outstanding": shares_outstanding,
+        "pe_ratio": pe_ratio,
         "market_cap": (
             _number(_first(raw, ["MarketCap", "market_cap", "marketCap", "Mkt Cap"]))
             or (
-                (_number(_first(raw, ["shares_outstanding", "sharesOutstanding"])) or 0) * last_price
-                if last_price is not None
+                (shares_outstanding or 0) * last_price
+                if last_price is not None and shares_outstanding
                 else None
             )
         ),
