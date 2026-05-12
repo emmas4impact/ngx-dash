@@ -5905,6 +5905,10 @@ class HoldingTile extends StatelessWidget {
                           value: holding.quantity.toStringAsFixed(2),
                         ),
                         StockDetailValue(
+                          label: 'Purchase price/unit',
+                          value: moneyFormat.format(holding.avgPurchasePrice),
+                        ),
+                        StockDetailValue(
                           label: 'Invested',
                           value: moneyFormat.format(holding.totalCost),
                         ),
@@ -5949,6 +5953,12 @@ class HoldingTile extends StatelessWidget {
                     ),
                     Text(
                       'Invested ${moneyFormat.format(holding.totalCost)}',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    Text(
+                      'Buy ${moneyFormat.format(holding.avgPurchasePrice)}/unit',
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
@@ -6140,6 +6150,10 @@ class PortfolioHoldingDetail extends StatelessWidget {
                     StockDetailValue(
                       label: 'Amount invested',
                       value: moneyFormat.format(holding!.totalCost),
+                    ),
+                    StockDetailValue(
+                      label: 'Purchase price/unit',
+                      value: moneyFormat.format(holding!.avgPurchasePrice),
                     ),
                     StockDetailValue(
                       label: 'Current value',
@@ -9168,23 +9182,21 @@ class StockTile extends StatelessWidget {
 }
 
 enum PriceChartType {
-  candlestick('Candles'),
   line('Line'),
-  bar('Bar'),
-  scatter('Scatter');
+  bar('Bar');
 
   const PriceChartType(this.label);
 
   final String label;
 }
 
-PriceChartType _preferredChartType = PriceChartType.candlestick;
+PriceChartType _preferredChartType = PriceChartType.line;
 
 PriceChartType parsePriceChartType(String? value) {
   for (final type in PriceChartType.values) {
     if (type.name == value) return type;
   }
-  return PriceChartType.candlestick;
+  return PriceChartType.line;
 }
 
 List<PricePoint> chartDisplayPoints(
@@ -9301,6 +9313,7 @@ int _firstIndexOnOrAfterMonthStart(
 Set<int> _calendarChartBottomLabelIndices(
   List<PricePoint> points,
   String rangeLabel,
+  int maxTicks,
 ) {
   if (points.isEmpty) {
     return const <int>{};
@@ -9315,7 +9328,6 @@ Set<int> _calendarChartBottomLabelIndices(
   if (monthStarts.length > maxMonths) {
     monthStarts = monthStarts.sublist(monthStarts.length - maxMonths);
   }
-  final maxTicks = rangeLabel == '6M' ? 6 : 8;
   if (monthStarts.length > maxTicks) {
     final step = max(1, ((monthStarts.length - 1) / (maxTicks - 1)).ceil());
     final picked = <DateTime>[monthStarts.first];
@@ -9348,12 +9360,22 @@ Set<int> chartBottomLabelIndices(
   List<PricePoint> points,
   PriceChartType type,
   String? rangeLabel,
+  double chartWidth,
 ) {
   if (points.isEmpty) {
     return const <int>{};
   }
+  final widthTicks = chartWidth < 380
+      ? 4
+      : chartWidth < 520
+      ? 5
+      : chartWidth < 760
+      ? 6
+      : 8;
   if (type == PriceChartType.bar) {
-    final maxTicks = rangeLabel == 'ALL' ? 8 : 6;
+    final maxTicks = rangeLabel == 'ALL'
+        ? min(widthTicks, 8)
+        : min(widthTicks, 6);
     if (points.length <= maxTicks) {
       return {for (var i = 0; i < points.length; i++) i};
     }
@@ -9368,7 +9390,7 @@ Set<int> chartBottomLabelIndices(
   final useCalendarAxis =
       (rangeLabel == '6M' || rangeLabel == '1Y') && type != PriceChartType.bar;
   if (useCalendarAxis) {
-    return _calendarChartBottomLabelIndices(points, rangeLabel!);
+    return _calendarChartBottomLabelIndices(points, rangeLabel!, widthTicks);
   }
   if (type != PriceChartType.bar && points.length <= 12) {
     return {for (var i = 0; i < points.length; i++) i};
@@ -9386,7 +9408,7 @@ Set<int> chartBottomLabelIndices(
     monthChangeIndices.add(points.length - 1);
   }
 
-  final targetCount = type == PriceChartType.bar ? 6 : 5;
+  final targetCount = min(widthTicks, type == PriceChartType.bar ? 6 : 5);
   if (monthChangeIndices.length <= targetCount) {
     return monthChangeIndices.toSet();
   }
@@ -9418,7 +9440,7 @@ class PriceChart extends StatefulWidget {
 }
 
 class _PriceChartState extends State<PriceChart> {
-  late PriceChartType selectedType = PriceChartType.candlestick;
+  late PriceChartType selectedType = PriceChartType.line;
 
   @override
   void initState() {
@@ -9447,653 +9469,411 @@ class _PriceChartState extends State<PriceChart> {
 
   @override
   Widget build(BuildContext context) {
-    final displayPoints = chartDisplayPoints(
-      widget.points,
-      selectedType,
-      widget.rangeLabel,
-    );
-    final bottomLabelIndices = chartBottomLabelIndices(
-      displayPoints,
-      selectedType,
-      widget.rangeLabel,
-    );
     final theme = Theme.of(context);
-    final values = [
-      ...displayPoints.map((point) => point.open),
-      ...displayPoints.map((point) => point.high),
-      ...displayPoints.map((point) => point.low),
-      ...displayPoints.map((point) => point.close),
-    ];
-    final axisScale = chartAxisScaleForPrices(values);
-    final bullishColor = _gainColor;
-    final bearishColor = _lossColor;
-    final latest = displayPoints.last;
-    final earliest = displayPoints.first;
-    final highestHigh = displayPoints.map((point) => point.high).reduce(max);
-    final lowestLow = displayPoints.map((point) => point.low).reduce(min);
-    final totalVolume = displayPoints.fold<double>(
-      0,
-      (sum, point) => sum + (point.volume ?? 0),
-    );
-    final absoluteChange = latest.close - earliest.open;
-    final percentChange = earliest.open > 0
-        ? (absoluteChange / earliest.open) * 100
-        : 0.0;
-    final changeColor = absoluteChange >= 0 ? bullishColor : bearishColor;
-    final showYearOnAxis =
-        widget.rangeLabel == '1Y' ||
-        widget.rangeLabel == 'ALL' ||
-        latest.date.year != earliest.date.year;
-    final watNow = currentWatTime();
-    final latestWatDate = latest.date.toUtc().add(const Duration(hours: 1));
-    final useCurrentPriceLabel =
-        isMarketHoursWat(watNow) && isSameWatDate(latestWatDate, watNow);
-    final dateRangeLabel =
-        '${DateFormat.MMMd().format(earliest.date)} - ${DateFormat.MMMd().format(latest.date)}';
-    final verticalInterval = max(
-      1,
-      (displayPoints.length / (selectedType == PriceChartType.bar ? 6 : 4))
-          .ceil(),
-    ).toDouble();
-    final candleWidth = displayPoints.length > 220
-        ? 2.4
-        : displayPoints.length > 120
-        ? 3.6
-        : 5.2;
-    final candlesticks = [
-      for (var i = 0; i < displayPoints.length; i++)
-        CandlestickSpot(
-          x: i.toDouble(),
-          open: displayPoints[i].open,
-          high: displayPoints[i].high,
-          low: displayPoints[i].low,
-          close: displayPoints[i].close,
-        ),
-    ];
-    final closeSpots = [
-      for (var i = 0; i < displayPoints.length; i++)
-        FlSpot(i.toDouble(), displayPoints[i].close),
-    ];
-    final compactChart = !widget.showSummaryMetrics;
-    final chartHeight = compactChart ? 230.0 : 290.0;
-    final axisLabelStyle = theme.textTheme.labelSmall?.copyWith(
-      color: theme.colorScheme.onSurfaceVariant,
-    );
-    final useMonthlyBarLabels =
-        selectedType == PriceChartType.bar &&
-        displayPoints.length != widget.points.length;
-    final useCalendarMonthAxis =
-        (widget.rangeLabel == '6M' || widget.rangeLabel == '1Y') &&
-        selectedType != PriceChartType.bar;
-    final barWidth = displayPoints.length > 60
-        ? 8.0
-        : displayPoints.length > 24
-        ? 12.0
-        : 18.0;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final chartWidth = constraints.maxWidth.isFinite
+            ? constraints.maxWidth
+            : MediaQuery.sizeOf(context).width;
+        final displayPoints = chartDisplayPoints(
+          widget.points,
+          selectedType,
+          widget.rangeLabel,
+        );
+        final bottomLabelIndices = chartBottomLabelIndices(
+          displayPoints,
+          selectedType,
+          widget.rangeLabel,
+          chartWidth,
+        );
+        final values = [
+          ...displayPoints.map((point) => point.open),
+          ...displayPoints.map((point) => point.high),
+          ...displayPoints.map((point) => point.low),
+          ...displayPoints.map((point) => point.close),
+        ];
+        final axisScale = chartAxisScaleForPrices(values);
+        final bullishColor = _gainColor;
+        final bearishColor = _lossColor;
+        final latest = displayPoints.last;
+        final earliest = displayPoints.first;
+        final highestHigh = displayPoints
+            .map((point) => point.high)
+            .reduce(max);
+        final lowestLow = displayPoints.map((point) => point.low).reduce(min);
+        final totalVolume = displayPoints.fold<double>(
+          0,
+          (sum, point) => sum + (point.volume ?? 0),
+        );
+        final absoluteChange = latest.close - earliest.open;
+        final percentChange = earliest.open > 0
+            ? (absoluteChange / earliest.open) * 100
+            : 0.0;
+        final changeColor = absoluteChange >= 0 ? bullishColor : bearishColor;
+        final showYearOnAxis =
+            widget.rangeLabel == '1Y' ||
+            widget.rangeLabel == 'ALL' ||
+            latest.date.year != earliest.date.year;
+        final watNow = currentWatTime();
+        final latestWatDate = latest.date.toUtc().add(const Duration(hours: 1));
+        final useCurrentPriceLabel =
+            isMarketHoursWat(watNow) && isSameWatDate(latestWatDate, watNow);
+        final rangeFmt = earliest.date.year == latest.date.year
+            ? DateFormat.MMMd()
+            : DateFormat.yMMMd();
+        final dateRangeLabel =
+            '${rangeFmt.format(earliest.date)} - ${rangeFmt.format(latest.date)}';
+        final verticalInterval = max(
+          1,
+          (displayPoints.length / (selectedType == PriceChartType.bar ? 6 : 4))
+              .ceil(),
+        ).toDouble();
+        final closeSpots = [
+          for (var i = 0; i < displayPoints.length; i++)
+            FlSpot(i.toDouble(), displayPoints[i].close),
+        ];
+        final compactChart = !widget.showSummaryMetrics;
+        final chartHeight = compactChart ? 230.0 : 290.0;
+        final axisLabelStyle = theme.textTheme.labelSmall?.copyWith(
+          color: theme.colorScheme.onSurfaceVariant,
+          fontSize: chartWidth < 420 ? 10 : null,
+        );
+        final useMonthlyBarLabels =
+            selectedType == PriceChartType.bar &&
+            displayPoints.length != widget.points.length;
+        final useCalendarMonthAxis =
+            (widget.rangeLabel == '6M' || widget.rangeLabel == '1Y') &&
+            selectedType != PriceChartType.bar;
+        final barWidth = chartWidth < 420
+            ? 10.0
+            : displayPoints.length > 60
+            ? 8.0
+            : displayPoints.length > 24
+            ? 12.0
+            : 18.0;
 
-    String chartDateLabel(DateTime value) {
-      if (useMonthlyBarLabels) {
-        if (widget.rangeLabel == '3M') {
-          return DateFormat('d MMM').format(value);
+        String chartDateLabel(DateTime value) {
+          if (useMonthlyBarLabels) {
+            if (widget.rangeLabel == '3M') {
+              return DateFormat('d MMM').format(value);
+            }
+            return DateFormat('MMM yy').format(value);
+          }
+          if (useCalendarMonthAxis) {
+            final spanStart = displayPoints.first.date;
+            final spanEnd = displayPoints.last.date;
+            final crossesYear = spanStart.year != spanEnd.year;
+            if (widget.rangeLabel == '1Y' || crossesYear) {
+              return DateFormat('MMM yy').format(value);
+            }
+            return DateFormat.MMM().format(value);
+          }
+          return showYearOnAxis
+              ? DateFormat('MMM yy').format(value)
+              : DateFormat.MMM().format(value);
         }
-        return DateFormat('MMM yy').format(value);
-      }
-      if (useCalendarMonthAxis) {
-        final spanStart = displayPoints.first.date;
-        final spanEnd = displayPoints.last.date;
-        final crossesYear = spanStart.year != spanEnd.year;
-        if (widget.rangeLabel == '1Y' || crossesYear) {
-          return DateFormat('MMM yy').format(value);
+
+        String tooltipDateLabel(DateTime value) {
+          if (useMonthlyBarLabels) {
+            return DateFormat.yMMM().format(value);
+          }
+          return DateFormat.yMMMd().format(value);
         }
-        return DateFormat.MMM().format(value);
-      }
-      return showYearOnAxis
-          ? DateFormat('MMM yy').format(value)
-          : DateFormat.MMM().format(value);
-    }
 
-    String tooltipDateLabel(DateTime value) {
-      if (useMonthlyBarLabels) {
-        return DateFormat.yMMM().format(value);
-      }
-      return DateFormat.yMMMd().format(value);
-    }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Wrap(
-          spacing: 10,
-          runSpacing: 6,
-          crossAxisAlignment: WrapCrossAlignment.center,
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (widget.symbolLabel != null &&
-                widget.symbolLabel!.trim().isNotEmpty)
-              Text(
-                widget.symbolLabel!,
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
+            Wrap(
+              spacing: 10,
+              runSpacing: 6,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                if (widget.symbolLabel != null &&
+                    widget.symbolLabel!.trim().isNotEmpty)
+                  Text(
+                    widget.symbolLabel!,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                if (widget.rangeLabel != null)
+                  Text(
+                    '${widget.rangeLabel} ${selectedType.label.toLowerCase()} view',
+                    style: theme.textTheme.labelLarge?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                Text(
+                  '${widget.points.length} trading days',
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
                 ),
-              ),
-            if (widget.rangeLabel != null)
-              Text(
-                '${widget.rangeLabel} ${selectedType.label.toLowerCase()} view',
-                style: theme.textTheme.labelLarge?.copyWith(
-                  fontWeight: FontWeight.w700,
+                Text(
+                  dateRangeLabel,
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
                 ),
-              ),
-            Text(
-              '${widget.points.length} trading days',
-              style: theme.textTheme.labelMedium?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
+              ],
             ),
-            Text(
-              dateRangeLabel,
-              style: theme.textTheme.labelMedium?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: PriceChartType.values
+                  .map(
+                    (type) => ChoiceChip(
+                      label: Text(type.label),
+                      selected: selectedType == type,
+                      onSelected: (_) => _setSelectedType(type),
+                    ),
+                  )
+                  .toList(),
             ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: PriceChartType.values
-              .map(
-                (type) => ChoiceChip(
-                  label: Text(type.label),
-                  selected: selectedType == type,
-                  onSelected: (_) => _setSelectedType(type),
-                ),
-              )
-              .toList(),
-        ),
-        if (widget.showSummaryMetrics) ...[
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 12,
-            runSpacing: 10,
-            children: [
-              ChartMetricChip(
-                label: 'Open',
-                value: moneyFormat.format(latest.open),
-                color: theme.colorScheme.tertiary,
-              ),
-              ChartMetricChip(
-                label: 'High',
-                value: moneyFormat.format(highestHigh),
-                color: bullishColor,
-              ),
-              ChartMetricChip(
-                label: 'Low',
-                value: moneyFormat.format(lowestLow),
-                color: bearishColor,
-              ),
-              ChartMetricChip(
-                label: useCurrentPriceLabel ? 'Current' : 'Close',
-                value: moneyFormat.format(latest.close),
-                color: changeColor,
-              ),
-              ChartMetricChip(
-                label: 'Move',
-                value:
-                    '${absoluteChange >= 0 ? '+' : ''}${moneyFormat.format(absoluteChange)} (${percentChange >= 0 ? '+' : ''}${percentChange.toStringAsFixed(2)}%)',
-                color: changeColor,
-              ),
-              ChartMetricChip(
-                label: 'Volume',
-                value: compactFormat.format(totalVolume),
-                color: theme.colorScheme.secondary,
+            if (widget.showSummaryMetrics) ...[
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 12,
+                runSpacing: 10,
+                children: [
+                  ChartMetricChip(
+                    label: 'Open',
+                    value: moneyFormat.format(latest.open),
+                    color: theme.colorScheme.tertiary,
+                  ),
+                  ChartMetricChip(
+                    label: 'High',
+                    value: moneyFormat.format(highestHigh),
+                    color: bullishColor,
+                  ),
+                  ChartMetricChip(
+                    label: 'Low',
+                    value: moneyFormat.format(lowestLow),
+                    color: bearishColor,
+                  ),
+                  ChartMetricChip(
+                    label: useCurrentPriceLabel ? 'Current' : 'Close',
+                    value: moneyFormat.format(latest.close),
+                    color: changeColor,
+                  ),
+                  ChartMetricChip(
+                    label: 'Move',
+                    value:
+                        '${absoluteChange >= 0 ? '+' : ''}${moneyFormat.format(absoluteChange)} (${percentChange >= 0 ? '+' : ''}${percentChange.toStringAsFixed(2)}%)',
+                    color: changeColor,
+                  ),
+                  ChartMetricChip(
+                    label: 'Volume',
+                    value: compactFormat.format(totalVolume),
+                    color: theme.colorScheme.secondary,
+                  ),
+                ],
               ),
             ],
-          ),
-        ],
-        const SizedBox(height: 12),
-        SizedBox(
-          height: chartHeight,
-          child: switch (selectedType) {
-            PriceChartType.candlestick => CandlestickChart(
-              CandlestickChartData(
-                candlestickSpots: candlesticks,
-                minX: 0,
-                maxX: max(1, displayPoints.length - 1).toDouble(),
-                minY: axisScale.minY,
-                maxY: axisScale.maxY,
-                candlestickPainter: DefaultCandlestickPainter(
-                  candlestickStyleProvider: (spot, _) {
-                    final color = spot.isUp ? bullishColor : bearishColor;
-                    return CandlestickStyle(
-                      lineColor: color,
-                      lineWidth: 1.3,
-                      bodyStrokeColor: color,
-                      bodyStrokeWidth: 0,
-                      bodyFillColor: color.withValues(alpha: 0.96),
-                      bodyWidth: candleWidth,
-                      bodyRadius: 1.5,
-                    );
-                  },
-                ),
-                candlestickTouchData: CandlestickTouchData(
-                  touchSpotThreshold: 28,
-                  touchTooltipData: CandlestickTouchTooltipData(
-                    fitInsideHorizontally: true,
-                    fitInsideVertically: true,
-                    maxContentWidth: 220,
-                    tooltipPadding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 10,
+            const SizedBox(height: 12),
+            SizedBox(
+              height: chartHeight,
+              child: switch (selectedType) {
+                PriceChartType.line => LineChart(
+                  LineChartData(
+                    minX: 0,
+                    maxX: max(1, displayPoints.length - 1).toDouble(),
+                    minY: axisScale.minY,
+                    maxY: axisScale.maxY,
+                    borderData: FlBorderData(show: false),
+                    gridData: FlGridData(
+                      show: true,
+                      drawVerticalLine: true,
+                      verticalInterval: verticalInterval,
+                      getDrawingHorizontalLine: (_) =>
+                          FlLine(color: chartGridColor(theme), strokeWidth: 1),
+                      getDrawingVerticalLine: (_) =>
+                          FlLine(color: chartGridColor(theme), strokeWidth: 1),
                     ),
-                    getTooltipColor: (spot) => theme.colorScheme.surface,
-                    getTooltipItems: (painter, touchedSpot, spotIndex) {
-                      final tooltipStyle = theme.textTheme.labelMedium
-                          ?.copyWith(
-                            color: theme.colorScheme.onSurface,
-                            fontWeight: FontWeight.w700,
-                          );
-                      return CandlestickTooltipItem(
-                        DateFormat.yMMMd().format(
-                          displayPoints[touchedSpot.x.toInt()].date,
-                        ),
-                        textStyle: tooltipStyle,
-                        textAlign: TextAlign.left,
-                        children: [
-                          TextSpan(
-                            text:
-                                '\nO ${moneyFormat.format(touchedSpot.open)}  H ${moneyFormat.format(touchedSpot.high)}'
-                                '\nL ${moneyFormat.format(touchedSpot.low)}  C ${moneyFormat.format(touchedSpot.close)}',
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: theme.colorScheme.onSurface,
+                    lineTouchData: LineTouchData(
+                      handleBuiltInTouches: true,
+                      touchTooltipData: LineTouchTooltipData(
+                        fitInsideHorizontally: true,
+                        fitInsideVertically: true,
+                        getTooltipColor: (_) => theme.colorScheme.surface,
+                        getTooltipItems: (spots) => spots
+                            .map(
+                              (spot) => LineTooltipItem(
+                                '${tooltipDateLabel(displayPoints[spot.x.toInt()].date)}\n${moneyFormat.format(spot.y)}',
+                                theme.textTheme.labelMedium!.copyWith(
+                                  color: theme.colorScheme.onSurface,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            )
+                            .toList(),
+                      ),
+                    ),
+                    titlesData: FlTitlesData(
+                      topTitles: const AxisTitles(
+                        sideTitles: SideTitles(showTitles: false),
+                      ),
+                      rightTitles: const AxisTitles(
+                        sideTitles: SideTitles(showTitles: false),
+                      ),
+                      leftTitles: AxisTitles(
+                        sideTitles: SideTitles(
+                          showTitles: true,
+                          reservedSize: 56,
+                          interval: axisScale.interval,
+                          getTitlesWidget: (value, meta) => Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: Text(
+                              chartAxisLabel(value),
+                              style: axisLabelStyle,
                             ),
                           ),
-                        ],
-                      );
-                    },
-                  ),
-                ),
-                touchedPointIndicator: AxisSpotIndicator(
-                  painter: AxisLinesIndicatorPainter(
-                    horizontalLineProvider: (y) => HorizontalLine(
-                      y: y,
-                      color: theme.colorScheme.outline.withValues(alpha: 0.65),
-                      strokeWidth: 1,
-                      label: HorizontalLineLabel(
-                        show: true,
-                        alignment: Alignment.topRight,
-                        padding: const EdgeInsets.only(bottom: 2),
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: theme.colorScheme.onSurface,
-                          fontWeight: FontWeight.w700,
                         ),
-                        labelResolver: (line) => moneyFormat.format(line.y),
                       ),
-                    ),
-                    verticalLineProvider: (x) {
-                      final spotIndex = x
-                          .round()
-                          .clamp(0, candlesticks.length - 1)
-                          .toInt();
-                      final spot = candlesticks[spotIndex];
-                      final color = spot.isUp ? bullishColor : bearishColor;
-                      return VerticalLine(
-                        x: x,
-                        color: color.withValues(alpha: 0.45),
-                        strokeWidth: 1,
-                      );
-                    },
-                  ),
-                ),
-                gridData: FlGridData(
-                  show: true,
-                  drawVerticalLine: true,
-                  getDrawingHorizontalLine: (_) =>
-                      FlLine(color: chartGridColor(theme), strokeWidth: 1),
-                  getDrawingVerticalLine: (_) =>
-                      FlLine(color: chartGridColor(theme), strokeWidth: 1),
-                  verticalInterval: verticalInterval,
-                ),
-                borderData: FlBorderData(show: false),
-                titlesData: FlTitlesData(
-                  topTitles: const AxisTitles(
-                    sideTitles: SideTitles(showTitles: false),
-                  ),
-                  rightTitles: const AxisTitles(
-                    sideTitles: SideTitles(showTitles: false),
-                  ),
-                  leftTitles: AxisTitles(
-                    sideTitles: SideTitles(
-                      showTitles: true,
-                      reservedSize: 56,
-                      interval: axisScale.interval,
-                      getTitlesWidget: (value, meta) => Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: Text(
-                          chartAxisLabel(value),
-                          style: axisLabelStyle,
+                      bottomTitles: AxisTitles(
+                        sideTitles: SideTitles(
+                          showTitles: true,
+                          reservedSize: selectedType == PriceChartType.bar
+                              ? 40
+                              : 32,
+                          interval: 1,
+                          getTitlesWidget: (value, meta) {
+                            final index = value.round();
+                            if (index < 0 ||
+                                index >= displayPoints.length ||
+                                !bottomLabelIndices.contains(index)) {
+                              return const SizedBox.shrink();
+                            }
+                            final point = displayPoints[index];
+                            return Padding(
+                              padding: const EdgeInsets.only(top: 8),
+                              child: Text(
+                                chartDateLabel(point.date),
+                                style: axisLabelStyle,
+                              ),
+                            );
+                          },
                         ),
                       ),
                     ),
+                    lineBarsData: [
+                      LineChartBarData(
+                        spots: closeSpots,
+                        color: changeColor,
+                        isCurved: true,
+                        barWidth: 3,
+                        belowBarData: BarAreaData(
+                          show: true,
+                          color: changeColor.withValues(alpha: 0.14),
+                        ),
+                        dotData: const FlDotData(show: false),
+                      ),
+                    ],
                   ),
-                  bottomTitles: AxisTitles(
-                    sideTitles: SideTitles(
-                      showTitles: true,
-                      reservedSize: selectedType == PriceChartType.bar
-                          ? 40
-                          : 32,
-                      interval: 1,
-                      getTitlesWidget: (value, meta) {
-                        final index = value.round();
-                        if (index < 0 ||
-                            index >= displayPoints.length ||
-                            !bottomLabelIndices.contains(index)) {
-                          return const SizedBox.shrink();
-                        }
-                        final point = displayPoints[index];
-                        return Padding(
-                          padding: const EdgeInsets.only(top: 8),
-                          child: Text(
-                            chartDateLabel(point.date),
-                            style: axisLabelStyle,
-                          ),
-                        );
-                      },
+                ),
+                PriceChartType.bar => BarChart(
+                  BarChartData(
+                    minY: axisScale.minY,
+                    maxY: axisScale.maxY,
+                    alignment: BarChartAlignment.spaceBetween,
+                    gridData: FlGridData(
+                      show: true,
+                      drawVerticalLine: false,
+                      getDrawingHorizontalLine: (_) =>
+                          FlLine(color: chartGridColor(theme), strokeWidth: 1),
                     ),
-                  ),
-                ),
-              ),
-            ),
-            PriceChartType.line => LineChart(
-              LineChartData(
-                minX: 0,
-                maxX: max(1, displayPoints.length - 1).toDouble(),
-                minY: axisScale.minY,
-                maxY: axisScale.maxY,
-                borderData: FlBorderData(show: false),
-                gridData: FlGridData(
-                  show: true,
-                  drawVerticalLine: true,
-                  verticalInterval: verticalInterval,
-                  getDrawingHorizontalLine: (_) =>
-                      FlLine(color: chartGridColor(theme), strokeWidth: 1),
-                  getDrawingVerticalLine: (_) =>
-                      FlLine(color: chartGridColor(theme), strokeWidth: 1),
-                ),
-                lineTouchData: LineTouchData(
-                  handleBuiltInTouches: true,
-                  touchTooltipData: LineTouchTooltipData(
-                    fitInsideHorizontally: true,
-                    fitInsideVertically: true,
-                    getTooltipColor: (_) => theme.colorScheme.surface,
-                    getTooltipItems: (spots) => spots
-                        .map(
-                          (spot) => LineTooltipItem(
-                            '${tooltipDateLabel(displayPoints[spot.x.toInt()].date)}\n${moneyFormat.format(spot.y)}',
+                    borderData: FlBorderData(show: false),
+                    barTouchData: BarTouchData(
+                      enabled: true,
+                      touchTooltipData: BarTouchTooltipData(
+                        fitInsideHorizontally: true,
+                        fitInsideVertically: true,
+                        getTooltipColor: (_) => theme.colorScheme.surface,
+                        getTooltipItem: (group, groupIndex, rod, rodIndex) {
+                          final point = displayPoints[group.x.toInt()];
+                          return BarTooltipItem(
+                            '${tooltipDateLabel(point.date)}\n${moneyFormat.format(rod.toY)}',
                             theme.textTheme.labelMedium!.copyWith(
                               color: theme.colorScheme.onSurface,
                               fontWeight: FontWeight.w700,
                             ),
+                          );
+                        },
+                      ),
+                    ),
+                    titlesData: FlTitlesData(
+                      topTitles: const AxisTitles(
+                        sideTitles: SideTitles(showTitles: false),
+                      ),
+                      rightTitles: const AxisTitles(
+                        sideTitles: SideTitles(showTitles: false),
+                      ),
+                      leftTitles: AxisTitles(
+                        sideTitles: SideTitles(
+                          showTitles: true,
+                          reservedSize: 56,
+                          interval: axisScale.interval,
+                          getTitlesWidget: (value, meta) => Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: Text(
+                              chartAxisLabel(value),
+                              style: axisLabelStyle,
+                            ),
                           ),
-                        )
-                        .toList(),
-                  ),
-                ),
-                titlesData: FlTitlesData(
-                  topTitles: const AxisTitles(
-                    sideTitles: SideTitles(showTitles: false),
-                  ),
-                  rightTitles: const AxisTitles(
-                    sideTitles: SideTitles(showTitles: false),
-                  ),
-                  leftTitles: AxisTitles(
-                    sideTitles: SideTitles(
-                      showTitles: true,
-                      reservedSize: 56,
-                      interval: axisScale.interval,
-                      getTitlesWidget: (value, meta) => Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: Text(
-                          chartAxisLabel(value),
-                          style: axisLabelStyle,
+                        ),
+                      ),
+                      bottomTitles: AxisTitles(
+                        sideTitles: SideTitles(
+                          showTitles: true,
+                          reservedSize: selectedType == PriceChartType.bar
+                              ? 40
+                              : 32,
+                          interval: 1,
+                          getTitlesWidget: (value, meta) {
+                            final index = value.round();
+                            if (index < 0 ||
+                                index >= displayPoints.length ||
+                                !bottomLabelIndices.contains(index)) {
+                              return const SizedBox.shrink();
+                            }
+                            final point = displayPoints[index];
+                            return Padding(
+                              padding: const EdgeInsets.only(top: 8),
+                              child: Text(
+                                chartDateLabel(point.date),
+                                style: axisLabelStyle,
+                              ),
+                            );
+                          },
                         ),
                       ),
                     ),
-                  ),
-                  bottomTitles: AxisTitles(
-                    sideTitles: SideTitles(
-                      showTitles: true,
-                      reservedSize: selectedType == PriceChartType.bar
-                          ? 40
-                          : 32,
-                      interval: 1,
-                      getTitlesWidget: (value, meta) {
-                        final index = value.round();
-                        if (index < 0 ||
-                            index >= displayPoints.length ||
-                            !bottomLabelIndices.contains(index)) {
-                          return const SizedBox.shrink();
-                        }
-                        final point = displayPoints[index];
-                        return Padding(
-                          padding: const EdgeInsets.only(top: 8),
-                          child: Text(
-                            chartDateLabel(point.date),
-                            style: axisLabelStyle,
-                          ),
-                        );
-                      },
-                    ),
+                    barGroups: [
+                      for (var i = 0; i < displayPoints.length; i++)
+                        BarChartGroupData(
+                          x: i,
+                          barRods: [
+                            BarChartRodData(
+                              toY: displayPoints[i].close,
+                              width: barWidth,
+                              color:
+                                  displayPoints[i].close >=
+                                      displayPoints[i].open
+                                  ? bullishColor
+                                  : bearishColor,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                          ],
+                        ),
+                    ],
                   ),
                 ),
-                lineBarsData: [
-                  LineChartBarData(
-                    spots: closeSpots,
-                    color: changeColor,
-                    isCurved: true,
-                    barWidth: 3,
-                    belowBarData: BarAreaData(
-                      show: true,
-                      color: changeColor.withValues(alpha: 0.14),
-                    ),
-                    dotData: const FlDotData(show: false),
-                  ),
-                ],
-              ),
+              },
             ),
-            PriceChartType.bar => BarChart(
-              BarChartData(
-                minY: axisScale.minY,
-                maxY: axisScale.maxY,
-                alignment: BarChartAlignment.spaceBetween,
-                gridData: FlGridData(
-                  show: true,
-                  drawVerticalLine: false,
-                  getDrawingHorizontalLine: (_) =>
-                      FlLine(color: chartGridColor(theme), strokeWidth: 1),
-                ),
-                borderData: FlBorderData(show: false),
-                barTouchData: BarTouchData(
-                  enabled: true,
-                  touchTooltipData: BarTouchTooltipData(
-                    fitInsideHorizontally: true,
-                    fitInsideVertically: true,
-                    getTooltipColor: (_) => theme.colorScheme.surface,
-                    getTooltipItem: (group, groupIndex, rod, rodIndex) {
-                      final point = displayPoints[group.x.toInt()];
-                      return BarTooltipItem(
-                        '${tooltipDateLabel(point.date)}\n${moneyFormat.format(rod.toY)}',
-                        theme.textTheme.labelMedium!.copyWith(
-                          color: theme.colorScheme.onSurface,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      );
-                    },
-                  ),
-                ),
-                titlesData: FlTitlesData(
-                  topTitles: const AxisTitles(
-                    sideTitles: SideTitles(showTitles: false),
-                  ),
-                  rightTitles: const AxisTitles(
-                    sideTitles: SideTitles(showTitles: false),
-                  ),
-                  leftTitles: AxisTitles(
-                    sideTitles: SideTitles(
-                      showTitles: true,
-                      reservedSize: 56,
-                      interval: axisScale.interval,
-                      getTitlesWidget: (value, meta) => Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: Text(
-                          chartAxisLabel(value),
-                          style: axisLabelStyle,
-                        ),
-                      ),
-                    ),
-                  ),
-                  bottomTitles: AxisTitles(
-                    sideTitles: SideTitles(
-                      showTitles: true,
-                      reservedSize: selectedType == PriceChartType.bar
-                          ? 40
-                          : 32,
-                      interval: 1,
-                      getTitlesWidget: (value, meta) {
-                        final index = value.round();
-                        if (index < 0 ||
-                            index >= displayPoints.length ||
-                            !bottomLabelIndices.contains(index)) {
-                          return const SizedBox.shrink();
-                        }
-                        final point = displayPoints[index];
-                        return Padding(
-                          padding: const EdgeInsets.only(top: 8),
-                          child: Text(
-                            chartDateLabel(point.date),
-                            style: axisLabelStyle,
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                ),
-                barGroups: [
-                  for (var i = 0; i < displayPoints.length; i++)
-                    BarChartGroupData(
-                      x: i,
-                      barRods: [
-                        BarChartRodData(
-                          toY: displayPoints[i].close,
-                          width: barWidth,
-                          color: displayPoints[i].close >= displayPoints[i].open
-                              ? bullishColor
-                              : bearishColor,
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                      ],
-                    ),
-                ],
-              ),
-            ),
-            PriceChartType.scatter => ScatterChart(
-              ScatterChartData(
-                minX: 0,
-                maxX: max(1, displayPoints.length - 1).toDouble(),
-                minY: axisScale.minY,
-                maxY: axisScale.maxY,
-                borderData: FlBorderData(show: false),
-                gridData: FlGridData(
-                  show: true,
-                  drawVerticalLine: true,
-                  verticalInterval: verticalInterval,
-                  getDrawingHorizontalLine: (_) =>
-                      FlLine(color: chartGridColor(theme), strokeWidth: 1),
-                  getDrawingVerticalLine: (_) =>
-                      FlLine(color: chartGridColor(theme), strokeWidth: 1),
-                ),
-                scatterTouchData: ScatterTouchData(
-                  enabled: true,
-                  touchTooltipData: ScatterTouchTooltipData(
-                    fitInsideHorizontally: true,
-                    fitInsideVertically: true,
-                    getTooltipColor: (_) => theme.colorScheme.surface,
-                    getTooltipItems: (spot) {
-                      final point = displayPoints[spot.x.toInt()];
-                      return ScatterTooltipItem(
-                        '${tooltipDateLabel(point.date)}\n${moneyFormat.format(spot.y)}',
-                        textStyle: theme.textTheme.labelMedium?.copyWith(
-                          color: theme.colorScheme.onSurface,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      );
-                    },
-                  ),
-                ),
-                titlesData: FlTitlesData(
-                  topTitles: const AxisTitles(
-                    sideTitles: SideTitles(showTitles: false),
-                  ),
-                  rightTitles: const AxisTitles(
-                    sideTitles: SideTitles(showTitles: false),
-                  ),
-                  leftTitles: AxisTitles(
-                    sideTitles: SideTitles(
-                      showTitles: true,
-                      reservedSize: 56,
-                      interval: axisScale.interval,
-                      getTitlesWidget: (value, meta) => Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: Text(
-                          chartAxisLabel(value),
-                          style: axisLabelStyle,
-                        ),
-                      ),
-                    ),
-                  ),
-                  bottomTitles: AxisTitles(
-                    sideTitles: SideTitles(
-                      showTitles: true,
-                      reservedSize: selectedType == PriceChartType.bar
-                          ? 40
-                          : 32,
-                      interval: 1,
-                      getTitlesWidget: (value, meta) {
-                        final index = value.round();
-                        if (index < 0 ||
-                            index >= displayPoints.length ||
-                            !bottomLabelIndices.contains(index)) {
-                          return const SizedBox.shrink();
-                        }
-                        final point = displayPoints[index];
-                        return Padding(
-                          padding: const EdgeInsets.only(top: 8),
-                          child: Text(
-                            chartDateLabel(point.date),
-                            style: axisLabelStyle,
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                ),
-                scatterSpots: [
-                  for (var i = 0; i < displayPoints.length; i++)
-                    ScatterSpot(
-                      i.toDouble(),
-                      displayPoints[i].close,
-                      dotPainter: FlDotCirclePainter(
-                        radius: compactChart ? 4.2 : 5.2,
-                        color: displayPoints[i].close >= displayPoints[i].open
-                            ? bullishColor
-                            : bearishColor,
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          },
-        ),
-      ],
+          ],
+        );
+      },
     );
   }
 }
