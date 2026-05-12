@@ -416,28 +416,29 @@ def market_ideas_payload(db: Session, limit: int) -> dict:
     for candidate in candidates[: max(limit * 2, 6)]:
         ngx_id = candidate.pop("ngx_id", None)
         if ngx_id:
-            try:
-                news = fetch_company_news_cached(ngx_id)
-            except NgxFetchError as exc:
-                logger.warning("Company news fetch failed while building ideas for %s: %s", candidate["stock"]["symbol"], exc)
-            else:
-                if news:
-                    latest = news[0]
-                    candidate["web_summary"] = latest.get("title") or latest.get("submission_type")
-                    candidate["score"] = round(candidate["score"] + 5.0, 2)
+            news = get_cached_company_news(
+                db,
+                candidate["stock"]["symbol"],
+                ngx_id,
+                6,
+            )
+            if news:
+                latest = news[0]
+                candidate["web_summary"] = latest.get("title") or latest.get("submission_type")
+                candidate["score"] = round(candidate["score"] + 5.0, 2)
+                candidate["rationale"] = [
+                    *candidate["rationale"],
+                    "Recent company update/disclosure is available from NGX sources.",
+                ][:5]
+                latest_title = (latest.get("title") or "").lower()
+                if any(
+                    keyword in latest_title
+                    for keyword in ("audited", "annual report", "financial statement", "q1", "q2", "q3", "q4")
+                ):
                     candidate["rationale"] = [
                         *candidate["rationale"],
-                        "Recent company update/disclosure is available from NGX sources.",
+                        "Latest filing references recent financial statements from the previous reporting period.",
                     ][:5]
-                    latest_title = (latest.get("title") or "").lower()
-                    if any(
-                        keyword in latest_title
-                        for keyword in ("audited", "annual report", "financial statement", "q1", "q2", "q3", "q4")
-                    ):
-                        candidate["rationale"] = [
-                            *candidate["rationale"],
-                            "Latest filing references recent financial statements from the previous reporting period.",
-                        ][:5]
         enriched.append(candidate)
 
     enriched.sort(key=lambda item: (item["score"], item["stock"]["symbol"]), reverse=True)

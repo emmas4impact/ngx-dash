@@ -778,12 +778,12 @@ def fetch_dividend_history_from_ngxpulse(symbol: str, limit: int = 8) -> list[di
     payload: Any = None
     request_variants = [
         (
-            f"{_ngxpulse_base_url()}/api/ngxdata/dividends/{normalized_symbol}",
-            _ngxpulse_query_params({"limit": limit}),
-        ),
-        (
             f"{_ngxpulse_base_url()}/api/ngxdata/dividends",
             _ngxpulse_query_params({"symbol": normalized_symbol, "limit": limit}),
+        ),
+        (
+            f"{_ngxpulse_base_url()}/api/ngxdata/dividends/{normalized_symbol}",
+            _ngxpulse_query_params({"limit": limit}),
         ),
     ]
 

@@ -1202,7 +1202,9 @@ enum StockHistoryRange {
 
 String friendlyMarketStatusLabel(String status) {
   final normalized = status.trim().toUpperCase().replaceAll('-', '_');
-  if (normalized.isEmpty || normalized == 'UNKNOWN') return 'Market status unavailable';
+  if (normalized.isEmpty || normalized == 'UNKNOWN') {
+    return 'Market status unavailable';
+  }
   if (normalized.contains('PRE_OPEN')) return 'Pre-open';
   if (normalized.contains('START_INDEX') ||
       normalized == 'OPEN' ||
@@ -1623,7 +1625,8 @@ class PricePoint {
   bool get isBullish => close >= open;
 
   factory PricePoint.fromJson(Map<String, dynamic> json) {
-    final open = asDouble(json['open_price']) ?? asDouble(json['close_price']) ?? 0;
+    final open =
+        asDouble(json['open_price']) ?? asDouble(json['close_price']) ?? 0;
     final close = asDouble(json['close_price']) ?? open;
     return PricePoint(
       date: DateTime.parse(json['trade_date'] as String),
@@ -3416,7 +3419,8 @@ class LandingStockDetailSheet extends StatefulWidget {
   final Stock stock;
 
   @override
-  State<LandingStockDetailSheet> createState() => _LandingStockDetailSheetState();
+  State<LandingStockDetailSheet> createState() =>
+      _LandingStockDetailSheetState();
 }
 
 class _LandingStockDetailSheetState extends State<LandingStockDetailSheet> {
@@ -4322,8 +4326,9 @@ class VersionLabel extends StatelessWidget {
         future: packageInfoFuture,
         builder: (context, snapshot) {
           final info = snapshot.data;
-          final packageVersion =
-              info == null || info.version.isEmpty ? null : info.version;
+          final packageVersion = info == null || info.version.isEmpty
+              ? null
+              : info.version;
           final version = packageVersion ?? appDisplayVersion;
           final text = '$platformLabel $version';
           if (compact) {
@@ -6787,10 +6792,7 @@ class _ChartsScreenState extends State<ChartsScreen> {
   StockHistoryRange selectedRange = StockHistoryRange.oneMonth;
 
   void _loadSelectedStockData(String symbol) {
-    historyFuture = widget.api.history(
-      symbol,
-      range: selectedRange.queryValue,
-    );
+    historyFuture = widget.api.history(symbol, range: selectedRange.queryValue);
     dividendsFuture = widget.api.dividends(symbol, limit: 10);
   }
 
@@ -6968,9 +6970,6 @@ class _ChartsScreenState extends State<ChartsScreen> {
                             );
                           }
                           return PriceChart(
-                            key: ValueKey(
-                              '$_historySelectionKey-${points.length}-${points.first.date.toIso8601String()}-${points.last.date.toIso8601String()}',
-                            ),
                             points: points,
                             symbolLabel: selectedSymbol,
                             rangeLabel: selectedRange.label,
@@ -7015,7 +7014,8 @@ class _ChartsScreenState extends State<ChartsScreen> {
                           }
                           return Column(
                             children: [
-                              for (final item in dividends) DividendTile(item: item),
+                              for (final item in dividends)
+                                DividendTile(item: item),
                             ],
                           );
                         },
@@ -8744,11 +8744,7 @@ class _LeaderTickerChip extends StatelessWidget {
 }
 
 class MarketIdeasPanel extends StatelessWidget {
-  const MarketIdeasPanel({
-    super.key,
-    required this.bundle,
-    this.emptyMessage,
-  });
+  const MarketIdeasPanel({super.key, required this.bundle, this.emptyMessage});
 
   final MarketIdeasBundle bundle;
   final String? emptyMessage;
@@ -8807,7 +8803,9 @@ class MarketIdeasPanel extends StatelessWidget {
                   gradient: LinearGradient(
                     colors: [
                       theme.colorScheme.primaryContainer.withValues(alpha: 0.9),
-                      theme.colorScheme.secondaryContainer.withValues(alpha: 0.72),
+                      theme.colorScheme.secondaryContainer.withValues(
+                        alpha: 0.72,
+                      ),
                     ],
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
@@ -8839,154 +8837,169 @@ class MarketIdeasPanel extends StatelessWidget {
               )
             else
               ...bundle.ideas.map(
-              (idea) => Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [
-                        theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.92),
-                        theme.colorScheme.primaryContainer.withValues(alpha: 0.2),
-                      ],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
+                (idea) => Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [
+                          theme.colorScheme.surfaceContainerHighest.withValues(
+                            alpha: 0.92,
+                          ),
+                          theme.colorScheme.primaryContainer.withValues(
+                            alpha: 0.2,
+                          ),
+                        ],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: theme.colorScheme.outlineVariant,
+                      ),
                     ),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: theme.colorScheme.outlineVariant),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Wrap(
-                        spacing: 10,
-                        runSpacing: 10,
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        children: [
-                          ConstrainedBox(
-                            constraints: const BoxConstraints(minWidth: 180, maxWidth: 360),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  idea.stock.symbol,
-                                  style: theme.textTheme.titleSmall?.copyWith(
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                                if ((idea.stock.name ?? '').isNotEmpty)
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Wrap(
+                          spacing: 10,
+                          runSpacing: 10,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            ConstrainedBox(
+                              constraints: const BoxConstraints(
+                                minWidth: 180,
+                                maxWidth: 360,
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
                                   Text(
-                                    idea.stock.name!,
-                                    style: theme.textTheme.bodySmall?.copyWith(
-                                      color: theme.colorScheme.onSurfaceVariant,
+                                    idea.stock.symbol,
+                                    style: theme.textTheme.titleSmall?.copyWith(
+                                      fontWeight: FontWeight.w700,
                                     ),
                                   ),
-                              ],
-                            ),
-                          ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 6,
-                            ),
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                colors: [
-                                  theme.colorScheme.primaryContainer,
-                                  theme.colorScheme.secondaryContainer,
+                                  if ((idea.stock.name ?? '').isNotEmpty)
+                                    Text(
+                                      idea.stock.name!,
+                                      style: theme.textTheme.bodySmall
+                                          ?.copyWith(
+                                            color: theme
+                                                .colorScheme
+                                                .onSurfaceVariant,
+                                          ),
+                                    ),
                                 ],
                               ),
-                              borderRadius: BorderRadius.circular(999),
                             ),
-                            child: Text(
-                              'Score ${idea.score.toStringAsFixed(1)}',
-                              style: theme.textTheme.labelMedium?.copyWith(
-                                color: theme.colorScheme.onPrimaryContainer,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ),
-                          if (idea.priceToEarningsRatio != null &&
-                              idea.priceToEarningsRatio!.isFinite &&
-                              idea.priceToEarningsRatio! > 0)
                             Container(
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 10,
                                 vertical: 6,
                               ),
                               decoration: BoxDecoration(
-                                color: theme.colorScheme.surface,
-                                borderRadius: BorderRadius.circular(999),
-                                border: Border.all(
-                                  color: theme.colorScheme.outlineVariant,
+                                gradient: LinearGradient(
+                                  colors: [
+                                    theme.colorScheme.primaryContainer,
+                                    theme.colorScheme.secondaryContainer,
+                                  ],
                                 ),
+                                borderRadius: BorderRadius.circular(999),
                               ),
                               child: Text(
-                                'P/E ${idea.priceToEarningsRatio!.toStringAsFixed(1)}',
+                                'Score ${idea.score.toStringAsFixed(1)}',
                                 style: theme.textTheme.labelMedium?.copyWith(
-                                  fontWeight: FontWeight.w600,
+                                  color: theme.colorScheme.onPrimaryContainer,
+                                  fontWeight: FontWeight.w700,
                                 ),
                               ),
                             ),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: idea.rationale
-                            .map(
-                              (reason) => Container(
+                            if (idea.priceToEarningsRatio != null &&
+                                idea.priceToEarningsRatio!.isFinite &&
+                                idea.priceToEarningsRatio! > 0)
+                              Container(
                                 padding: const EdgeInsets.symmetric(
                                   horizontal: 10,
                                   vertical: 6,
                                 ),
                                 decoration: BoxDecoration(
-                                  color: theme.colorScheme.surface.withValues(alpha: 0.96),
+                                  color: theme.colorScheme.surface,
                                   borderRadius: BorderRadius.circular(999),
                                   border: Border.all(
-                                    color: theme.colorScheme.secondary.withValues(alpha: 0.22),
+                                    color: theme.colorScheme.outlineVariant,
                                   ),
                                 ),
                                 child: Text(
-                                  reason,
-                                  style: theme.textTheme.labelMedium,
-                                  softWrap: true,
+                                  'P/E ${idea.priceToEarningsRatio!.toStringAsFixed(1)}',
+                                  style: theme.textTheme.labelMedium?.copyWith(
+                                    fontWeight: FontWeight.w600,
+                                  ),
                                 ),
                               ),
-                            )
-                            .toList(),
-                      ),
-                      if (idea.webSummary != null &&
-                          idea.webSummary!.isNotEmpty) ...[
+                          ],
+                        ),
                         const SizedBox(height: 10),
-                        Text(
-                          'Latest company update',
-                          style: theme.textTheme.labelLarge?.copyWith(
-                            fontWeight: FontWeight.w700,
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: idea.rationale
+                              .map(
+                                (reason) => Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 6,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: theme.colorScheme.surface.withValues(
+                                      alpha: 0.96,
+                                    ),
+                                    borderRadius: BorderRadius.circular(999),
+                                    border: Border.all(
+                                      color: theme.colorScheme.secondary
+                                          .withValues(alpha: 0.22),
+                                    ),
+                                  ),
+                                  child: Text(
+                                    reason,
+                                    style: theme.textTheme.labelMedium,
+                                    softWrap: true,
+                                  ),
+                                ),
+                              )
+                              .toList(),
+                        ),
+                        if (idea.webSummary != null &&
+                            idea.webSummary!.isNotEmpty) ...[
+                          const SizedBox(height: 10),
+                          Text(
+                            'Latest company update',
+                            style: theme.textTheme.labelLarge?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          idea.webSummary!,
-                          style: theme.textTheme.bodyMedium,
-                        ),
-                      ],
-                      if (idea.fundamentalNote != null &&
-                          idea.fundamentalNote!.isNotEmpty) ...[
-                        const SizedBox(height: 10),
-                        Text(
-                          idea.fundamentalNote!,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
+                          const SizedBox(height: 4),
+                          Text(
+                            idea.webSummary!,
+                            style: theme.textTheme.bodyMedium,
                           ),
-                        ),
+                        ],
+                        if (idea.fundamentalNote != null &&
+                            idea.fundamentalNote!.isNotEmpty) ...[
+                          const SizedBox(height: 10),
+                          Text(
+                            idea.fundamentalNote!,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
                       ],
-                    ],
+                    ),
                   ),
                 ),
               ),
-            ),
           ],
         ),
       ),
@@ -9179,30 +9192,73 @@ List<PricePoint> chartDisplayPoints(
   PriceChartType type,
   String? rangeLabel,
 ) {
-  if (type != PriceChartType.bar) return points;
-  if (points.length <= 90) return points;
-  if (rangeLabel != '6M' && rangeLabel != '1Y' && rangeLabel != 'ALL') {
-    return points;
+  if (type != PriceChartType.bar || points.length <= 24) return points;
+  final normalizedRange = rangeLabel?.toUpperCase();
+  switch (normalizedRange) {
+    case '3M':
+      return _aggregatePricePointsByTradingWindow(points, bucketSize: 5);
+    case '6M':
+    case '1Y':
+      return _aggregatePricePointsByCalendar(points, _monthBucketKey);
+    case 'ALL':
+      final monthSpan =
+          ((points.last.date.year - points.first.date.year) * 12) +
+          (points.last.date.month - points.first.date.month) +
+          1;
+      if (monthSpan > 24) {
+        return _aggregatePricePointsByCalendar(points, _quarterBucketKey);
+      }
+      return _aggregatePricePointsByCalendar(points, _monthBucketKey);
+    default:
+      return points;
   }
+}
 
+List<PricePoint> _aggregatePricePointsByTradingWindow(
+  List<PricePoint> points, {
+  required int bucketSize,
+}) {
+  if (points.length <= bucketSize) return points;
+  final aggregated = <PricePoint>[];
+  for (var start = 0; start < points.length; start += bucketSize) {
+    final end = min(start + bucketSize, points.length);
+    aggregated.add(_mergePricePointBucket(points.sublist(start, end)));
+  }
+  return aggregated;
+}
+
+List<PricePoint> _aggregatePricePointsByCalendar(
+  List<PricePoint> points,
+  String Function(DateTime) bucketKeyForDate,
+) {
   final buckets = <String, List<PricePoint>>{};
   for (final point in points) {
-    final key = '${point.date.year}-${point.date.month.toString().padLeft(2, '0')}';
-    buckets.putIfAbsent(key, () => <PricePoint>[]).add(point);
+    buckets
+        .putIfAbsent(bucketKeyForDate(point.date), () => <PricePoint>[])
+        .add(point);
   }
+  return buckets.values.map(_mergePricePointBucket).toList();
+}
 
-  return buckets.values.map((bucket) {
-    final first = bucket.first;
-    final last = bucket.last;
-    return PricePoint(
-      date: last.date,
-      open: first.open,
-      high: bucket.map((item) => item.high).reduce(max),
-      low: bucket.map((item) => item.low).reduce(min),
-      close: last.close,
-      volume: bucket.fold<double>(0, (sum, item) => sum + (item.volume ?? 0)),
-    );
-  }).toList();
+PricePoint _mergePricePointBucket(List<PricePoint> bucket) {
+  final first = bucket.first;
+  final last = bucket.last;
+  return PricePoint(
+    date: last.date,
+    open: first.open,
+    high: bucket.map((item) => item.high).reduce(max),
+    low: bucket.map((item) => item.low).reduce(min),
+    close: last.close,
+    volume: bucket.fold<double>(0, (sum, item) => sum + (item.volume ?? 0)),
+  );
+}
+
+String _monthBucketKey(DateTime date) =>
+    '${date.year}-${date.month.toString().padLeft(2, '0')}';
+
+String _quarterBucketKey(DateTime date) {
+  final quarter = ((date.month - 1) ~/ 3) + 1;
+  return '${date.year}-Q$quarter';
 }
 
 /// First day of each calendar month from [first] through [last] (inclusive).
@@ -9229,7 +9285,10 @@ List<DateTime> _monthStartsInDataSpan(DateTime first, DateTime last) {
   return months;
 }
 
-int _firstIndexOnOrAfterMonthStart(List<PricePoint> points, DateTime monthStart) {
+int _firstIndexOnOrAfterMonthStart(
+  List<PricePoint> points,
+  DateTime monthStart,
+) {
   for (var i = 0; i < points.length; i++) {
     final d = points[i].date;
     if (!d.isBefore(monthStart)) {
@@ -9239,7 +9298,10 @@ int _firstIndexOnOrAfterMonthStart(List<PricePoint> points, DateTime monthStart)
   return points.length - 1;
 }
 
-Set<int> _calendarChartBottomLabelIndices(List<PricePoint> points, String rangeLabel) {
+Set<int> _calendarChartBottomLabelIndices(
+  List<PricePoint> points,
+  String rangeLabel,
+) {
   if (points.isEmpty) {
     return const <int>{};
   }
@@ -9289,6 +9351,19 @@ Set<int> chartBottomLabelIndices(
 ) {
   if (points.isEmpty) {
     return const <int>{};
+  }
+  if (type == PriceChartType.bar) {
+    final maxTicks = rangeLabel == 'ALL' ? 8 : 6;
+    if (points.length <= maxTicks) {
+      return {for (var i = 0; i < points.length; i++) i};
+    }
+    final step = max(1, ((points.length - 1) / (maxTicks - 1)).ceil());
+    final result = <int>{0};
+    for (var i = step; i < points.length - 1; i += step) {
+      result.add(i);
+    }
+    result.add(points.length - 1);
+    return result;
   }
   final useCalendarAxis =
       (rangeLabel == '6M' || rangeLabel == '1Y') && type != PriceChartType.bar;
@@ -9445,10 +9520,11 @@ class _PriceChartState extends State<PriceChart> {
       color: theme.colorScheme.onSurfaceVariant,
     );
     final useMonthlyBarLabels =
-        selectedType == PriceChartType.bar && displayPoints.length != widget.points.length;
+        selectedType == PriceChartType.bar &&
+        displayPoints.length != widget.points.length;
     final useCalendarMonthAxis =
         (widget.rangeLabel == '6M' || widget.rangeLabel == '1Y') &&
-            selectedType != PriceChartType.bar;
+        selectedType != PriceChartType.bar;
     final barWidth = displayPoints.length > 60
         ? 8.0
         : displayPoints.length > 24
@@ -9457,6 +9533,9 @@ class _PriceChartState extends State<PriceChart> {
 
     String chartDateLabel(DateTime value) {
       if (useMonthlyBarLabels) {
+        if (widget.rangeLabel == '3M') {
+          return DateFormat('d MMM').format(value);
+        }
         return DateFormat('MMM yy').format(value);
       }
       if (useCalendarMonthAxis) {
@@ -9488,7 +9567,8 @@ class _PriceChartState extends State<PriceChart> {
           runSpacing: 6,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
-            if (widget.symbolLabel != null && widget.symbolLabel!.trim().isNotEmpty)
+            if (widget.symbolLabel != null &&
+                widget.symbolLabel!.trim().isNotEmpty)
               Text(
                 widget.symbolLabel!,
                 style: theme.textTheme.titleMedium?.copyWith(
@@ -9607,10 +9687,11 @@ class _PriceChartState extends State<PriceChart> {
                     ),
                     getTooltipColor: (spot) => theme.colorScheme.surface,
                     getTooltipItems: (painter, touchedSpot, spotIndex) {
-                      final tooltipStyle = theme.textTheme.labelMedium?.copyWith(
-                        color: theme.colorScheme.onSurface,
-                        fontWeight: FontWeight.w700,
-                      );
+                      final tooltipStyle = theme.textTheme.labelMedium
+                          ?.copyWith(
+                            color: theme.colorScheme.onSurface,
+                            fontWeight: FontWeight.w700,
+                          );
                       return CandlestickTooltipItem(
                         DateFormat.yMMMd().format(
                           displayPoints[touchedSpot.x.toInt()].date,
@@ -9697,7 +9778,9 @@ class _PriceChartState extends State<PriceChart> {
                   bottomTitles: AxisTitles(
                     sideTitles: SideTitles(
                       showTitles: true,
-                      reservedSize: 32,
+                      reservedSize: selectedType == PriceChartType.bar
+                          ? 40
+                          : 32,
                       interval: 1,
                       getTitlesWidget: (value, meta) {
                         final index = value.round();
@@ -9769,14 +9852,19 @@ class _PriceChartState extends State<PriceChart> {
                       interval: axisScale.interval,
                       getTitlesWidget: (value, meta) => Padding(
                         padding: const EdgeInsets.only(right: 8),
-                        child: Text(chartAxisLabel(value), style: axisLabelStyle),
+                        child: Text(
+                          chartAxisLabel(value),
+                          style: axisLabelStyle,
+                        ),
                       ),
                     ),
                   ),
                   bottomTitles: AxisTitles(
                     sideTitles: SideTitles(
                       showTitles: true,
-                      reservedSize: 32,
+                      reservedSize: selectedType == PriceChartType.bar
+                          ? 40
+                          : 32,
                       interval: 1,
                       getTitlesWidget: (value, meta) {
                         final index = value.round();
@@ -9856,14 +9944,19 @@ class _PriceChartState extends State<PriceChart> {
                       interval: axisScale.interval,
                       getTitlesWidget: (value, meta) => Padding(
                         padding: const EdgeInsets.only(right: 8),
-                        child: Text(chartAxisLabel(value), style: axisLabelStyle),
+                        child: Text(
+                          chartAxisLabel(value),
+                          style: axisLabelStyle,
+                        ),
                       ),
                     ),
                   ),
                   bottomTitles: AxisTitles(
                     sideTitles: SideTitles(
                       showTitles: true,
-                      reservedSize: 32,
+                      reservedSize: selectedType == PriceChartType.bar
+                          ? 40
+                          : 32,
                       interval: 1,
                       getTitlesWidget: (value, meta) {
                         final index = value.round();
@@ -9950,14 +10043,19 @@ class _PriceChartState extends State<PriceChart> {
                       interval: axisScale.interval,
                       getTitlesWidget: (value, meta) => Padding(
                         padding: const EdgeInsets.only(right: 8),
-                        child: Text(chartAxisLabel(value), style: axisLabelStyle),
+                        child: Text(
+                          chartAxisLabel(value),
+                          style: axisLabelStyle,
+                        ),
                       ),
                     ),
                   ),
                   bottomTitles: AxisTitles(
                     sideTitles: SideTitles(
                       showTitles: true,
-                      reservedSize: 32,
+                      reservedSize: selectedType == PriceChartType.bar
+                          ? 40
+                          : 32,
                       interval: 1,
                       getTitlesWidget: (value, meta) {
                         final index = value.round();
