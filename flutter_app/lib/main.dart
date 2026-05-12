@@ -5930,61 +5930,100 @@ class HoldingTile extends StatelessWidget {
             );
           }
 
-          return ListTile(
+          return InkWell(
             onTap: onTap,
-            leading: CompanyLogo(symbol: holding.symbol),
-            title: Text(holding.symbol),
-            subtitle: Text(
-              '${holding.name ?? holding.symbol} - ${holding.quantity.toStringAsFixed(2)} shares',
-            ),
-            trailing: Wrap(
-              spacing: 8,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      moneyFormat.format(holding.totalValue),
-                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
+            borderRadius: BorderRadius.circular(24),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+              child: Row(
+                children: [
+                  CompanyLogo(symbol: holding.symbol, size: 54),
+                  const SizedBox(width: 18),
+                  Expanded(
+                    flex: 8,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          holding.symbol,
+                          style: Theme.of(context).textTheme.titleLarge
+                              ?.copyWith(fontWeight: FontWeight.w700),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '${holding.name ?? holding.symbol} - ${holding.quantity.toStringAsFixed(2)} shares',
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                      ],
                     ),
-                    Text(
-                      'Invested ${moneyFormat.format(holding.totalCost)}',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    flex: 5,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(
+                          moneyFormat.format(holding.totalValue),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.titleLarge
+                              ?.copyWith(fontWeight: FontWeight.w700),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Invested ${moneyFormat.format(holding.totalCost)}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.bodyLarge
+                              ?.copyWith(
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onSurfaceVariant,
+                              ),
+                        ),
+                        Text(
+                          'Buy ${moneyFormat.format(holding.avgPurchasePrice)}/unit',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.bodyLarge
+                              ?.copyWith(
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onSurfaceVariant,
+                              ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '${holding.profitLossPercent?.toStringAsFixed(2) ?? '0.00'}%',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.titleMedium
+                              ?.copyWith(
+                                color: holding.profitLoss >= 0
+                                    ? Colors.green.shade700
+                                    : Colors.red.shade700,
+                                fontWeight: FontWeight.w700,
+                              ),
+                        ),
+                      ],
                     ),
-                    Text(
-                      'Buy ${moneyFormat.format(holding.avgPurchasePrice)}/unit',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                    Text(
-                      '${holding.profitLossPercent?.toStringAsFixed(2) ?? '0.00'}%',
-                      style: TextStyle(
-                        color: holding.profitLoss >= 0
-                            ? Colors.green.shade700
-                            : Colors.red.shade700,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ],
-                ),
-                IconButton(
-                  tooltip: 'Edit',
-                  onPressed: onEdit,
-                  icon: const Icon(Icons.edit_outlined),
-                ),
-                IconButton(
-                  tooltip: 'Delete',
-                  onPressed: onDelete,
-                  icon: const Icon(Icons.delete_outline),
-                ),
-              ],
+                  ),
+                  const SizedBox(width: 12),
+                  IconButton(
+                    tooltip: 'Edit',
+                    onPressed: onEdit,
+                    icon: const Icon(Icons.edit_outlined),
+                  ),
+                  IconButton(
+                    tooltip: 'Delete',
+                    onPressed: onDelete,
+                    icon: const Icon(Icons.delete_outline),
+                  ),
+                ],
+              ),
             ),
           );
         },
