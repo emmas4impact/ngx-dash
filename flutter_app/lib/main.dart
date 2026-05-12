@@ -5905,7 +5905,7 @@ class HoldingTile extends StatelessWidget {
                           value: holding.quantity.toStringAsFixed(2),
                         ),
                         StockDetailValue(
-                          label: 'Purchase price/unit',
+                          label: 'Purchase price',
                           value: moneyFormat.format(holding.avgPurchasePrice),
                         ),
                         StockDetailValue(
@@ -5930,23 +5930,28 @@ class HoldingTile extends StatelessWidget {
             );
           }
 
+          final desktopValueWidth = constraints.maxWidth >= 1500
+              ? 340.0
+              : constraints.maxWidth >= 1250
+              ? 300.0
+              : 260.0;
+
           return InkWell(
             onTap: onTap,
             borderRadius: BorderRadius.circular(24),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
               child: Row(
                 children: [
-                  CompanyLogo(symbol: holding.symbol, size: 54),
-                  const SizedBox(width: 18),
+                  CompanyLogo(symbol: holding.symbol, size: 46),
+                  const SizedBox(width: 16),
                   Expanded(
-                    flex: 8,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
                           holding.symbol,
-                          style: Theme.of(context).textTheme.titleLarge
+                          style: Theme.of(context).textTheme.titleMedium
                               ?.copyWith(fontWeight: FontWeight.w700),
                         ),
                         const SizedBox(height: 4),
@@ -5954,14 +5959,14 @@ class HoldingTile extends StatelessWidget {
                           '${holding.name ?? holding.symbol} - ${holding.quantity.toStringAsFixed(2)} shares',
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.titleMedium,
+                          style: Theme.of(context).textTheme.titleSmall,
                         ),
                       ],
                     ),
                   ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    flex: 5,
+                  const SizedBox(width: 14),
+                  SizedBox(
+                    width: desktopValueWidth,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
@@ -5969,7 +5974,7 @@ class HoldingTile extends StatelessWidget {
                           moneyFormat.format(holding.totalValue),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.titleLarge
+                          style: Theme.of(context).textTheme.titleMedium
                               ?.copyWith(fontWeight: FontWeight.w700),
                         ),
                         const SizedBox(height: 4),
@@ -5977,7 +5982,8 @@ class HoldingTile extends StatelessWidget {
                           'Invested ${moneyFormat.format(holding.totalCost)}',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.bodyLarge
+                          textAlign: TextAlign.right,
+                          style: Theme.of(context).textTheme.bodyMedium
                               ?.copyWith(
                                 color: Theme.of(
                                   context,
@@ -5985,10 +5991,11 @@ class HoldingTile extends StatelessWidget {
                               ),
                         ),
                         Text(
-                          'Buy ${moneyFormat.format(holding.avgPurchasePrice)}/unit',
+                          'Buy ${moneyFormat.format(holding.avgPurchasePrice)}',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.bodyLarge
+                          textAlign: TextAlign.right,
+                          style: Theme.of(context).textTheme.bodyMedium
                               ?.copyWith(
                                 color: Theme.of(
                                   context,
@@ -6000,7 +6007,7 @@ class HoldingTile extends StatelessWidget {
                           '${holding.profitLossPercent?.toStringAsFixed(2) ?? '0.00'}%',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.titleMedium
+                          style: Theme.of(context).textTheme.titleSmall
                               ?.copyWith(
                                 color: holding.profitLoss >= 0
                                     ? Colors.green.shade700
@@ -6191,7 +6198,7 @@ class PortfolioHoldingDetail extends StatelessWidget {
                       value: moneyFormat.format(holding!.totalCost),
                     ),
                     StockDetailValue(
-                      label: 'Purchase price/unit',
+                      label: 'Purchase price',
                       value: moneyFormat.format(holding!.avgPurchasePrice),
                     ),
                     StockDetailValue(
