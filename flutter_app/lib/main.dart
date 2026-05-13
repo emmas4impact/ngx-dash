@@ -34,6 +34,11 @@ const _darkScaffold = Color(0xFF101619);
 const _darkSurface = Color(0xFF162126);
 const _darkSurfaceAlt = Color(0xFF1A2B31);
 const _lightScaffold = Color(0xFFF4F6F9);
+final ValueNotifier<int> marketDataRefreshSignal = ValueNotifier<int>(0);
+
+void notifyMarketDataRefreshed() {
+  marketDataRefreshSignal.value = marketDataRefreshSignal.value + 1;
+}
 
 String stockLogoUrl(String symbol) =>
     '$apiBaseUrl/public/stocks/${Uri.encodeComponent(symbol)}/logo';
@@ -666,7 +671,11 @@ class ApiClient {
   String get accountDeletionUrl => '$baseUrl/public/account-deletion';
 
   Uri _uri(String path, [Map<String, String>? query]) {
-    return Uri.parse('$baseUrl$path').replace(queryParameters: query);
+    final merged = <String, String>{
+      if (query != null) ...query,
+      '_ts': DateTime.now().millisecondsSinceEpoch.toString(),
+    };
+    return Uri.parse('$baseUrl$path').replace(queryParameters: merged);
   }
 
   Future<void> register(String email, String password, String? fullName) async {
@@ -4639,6 +4648,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    marketDataRefreshSignal.addListener(_handleMarketDataRefresh);
     refreshTimer = Timer.periodic(const Duration(minutes: 15), (_) {
       if (mounted) refresh();
     });
@@ -4646,8 +4656,13 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    marketDataRefreshSignal.removeListener(_handleMarketDataRefresh);
     refreshTimer?.cancel();
     super.dispose();
+  }
+
+  void _handleMarketDataRefresh() {
+    if (mounted) refresh();
   }
 
   void refresh() {
@@ -5559,6 +5574,7 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
   @override
   void initState() {
     super.initState();
+    marketDataRefreshSignal.addListener(_handleMarketDataRefresh);
     refreshTimer = Timer.periodic(const Duration(minutes: 15), (_) {
       if (mounted) refresh();
     });
@@ -5566,8 +5582,13 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
 
   @override
   void dispose() {
+    marketDataRefreshSignal.removeListener(_handleMarketDataRefresh);
     refreshTimer?.cancel();
     super.dispose();
+  }
+
+  void _handleMarketDataRefresh() {
+    if (mounted) refresh();
   }
 
   void refresh() {
@@ -6652,6 +6673,7 @@ class _StocksScreenState extends State<StocksScreen> {
   @override
   void initState() {
     super.initState();
+    marketDataRefreshSignal.addListener(_handleMarketDataRefresh);
     refreshTimer = Timer.periodic(const Duration(minutes: 15), (_) {
       if (mounted) refresh();
     });
@@ -6659,10 +6681,15 @@ class _StocksScreenState extends State<StocksScreen> {
 
   @override
   void dispose() {
+    marketDataRefreshSignal.removeListener(_handleMarketDataRefresh);
     refreshTimer?.cancel();
     searchDebounce?.cancel();
     search.dispose();
     super.dispose();
+  }
+
+  void _handleMarketDataRefresh() {
+    if (mounted) refresh();
   }
 
   void refresh() {
@@ -6850,6 +6877,28 @@ class _ChartsScreenState extends State<ChartsScreen> {
   Future<List<DividendRecord>>? dividendsFuture;
   String? selectedSymbol;
   StockHistoryRange selectedRange = StockHistoryRange.oneMonth;
+
+  @override
+  void initState() {
+    super.initState();
+    marketDataRefreshSignal.addListener(_handleMarketDataRefresh);
+  }
+
+  @override
+  void dispose() {
+    marketDataRefreshSignal.removeListener(_handleMarketDataRefresh);
+    super.dispose();
+  }
+
+  void _handleMarketDataRefresh() {
+    if (!mounted) return;
+    setState(() {
+      stocksFuture = widget.api.stocks();
+      if (selectedSymbol != null) {
+        _loadSelectedStockData(selectedSymbol!);
+      }
+    });
+  }
 
   void _loadSelectedStockData(String symbol) {
     historyFuture = widget.api.history(symbol, range: selectedRange.queryValue);
@@ -7128,6 +7177,7 @@ class _AdminScreenState extends State<AdminScreen> {
     try {
       final message = await widget.api.syncStocks(includeHistory: false);
       refresh();
+      notifyMarketDataRefreshed();
       if (mounted) showMessage(context, message);
     } catch (error) {
       if (mounted) showError(context, error.toString());
@@ -7141,6 +7191,7 @@ class _AdminScreenState extends State<AdminScreen> {
     try {
       final message = await widget.api.syncStocks(includeHistory: true);
       refresh();
+      notifyMarketDataRefreshed();
       if (mounted) showMessage(context, message);
     } catch (error) {
       if (mounted) showError(context, error.toString());

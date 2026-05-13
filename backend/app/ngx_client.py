@@ -60,6 +60,18 @@ def _ttl_cache(ttl_seconds: int):
     return decorator
 
 
+def clear_runtime_caches(function_names: set[str] | None = None) -> None:
+    with _ttl_cache_lock:
+        if function_names is None:
+            _ttl_cache_store.clear()
+            return
+        stale_keys = [
+            key for key in _ttl_cache_store.keys() if str(key[0]) in function_names
+        ]
+        for key in stale_keys:
+            _ttl_cache_store.pop(key, None)
+
+
 def _number(value: Any) -> float | None:
     if value is None or value == "":
         return None

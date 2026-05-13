@@ -8,11 +8,13 @@ from sqlalchemy.orm import Session
 from .models import ApiCache, MarketStatus, PortfolioAlertState, PortfolioHolding, Stock, StockPrice, SyncLog, User
 from .ngx_client import (
     NgxFetchError,
+    clear_runtime_caches,
     fetch_all_stocks_from_ngx,
     fetch_company_news_cached,
     fetch_disclosures_cached,
     fetch_dividend_history_cached,
     fetch_historical_prices_cached,
+    fetch_market_snapshot_from_ngx,
     fetch_market_status_from_ngx,
     fetch_market_news_cached,
     fetch_market_snapshot_cached,
@@ -79,6 +81,13 @@ def record_sync_log(
 def sync_stocks(db: Session, include_history: bool = False) -> tuple[str, int, int, str, str | None]:
     settings = get_settings()
     source = "ngxpulse" if settings.ngxpulse_enabled else "ngx_doclib"
+    clear_runtime_caches(
+        {
+            "fetch_all_stocks_from_ngx_cached",
+            "fetch_market_snapshot_cached",
+            "fetch_market_news_cached",
+        }
+    )
     try:
         stocks = fetch_all_stocks_from_ngx()
     except NgxFetchError as exc:
@@ -123,7 +132,25 @@ def sync_stocks(db: Session, include_history: bool = False) -> tuple[str, int, i
         stocks_upserted=len(stocks),
         history_rows_upserted=history_count,
     )
+    if settings.ngxpulse_enabled:
+        try:
+            cache_api_payload(
+                db,
+                cache_key=MARKET_SNAPSHOT_CACHE_KEY,
+                payload=fetch_market_snapshot_from_ngx(),
+                source="ngxpulse_market_snapshot",
+            )
+        except NgxFetchError as exc:
+            record_sync_log(
+                db,
+                status="warning",
+                source=source,
+                message=f"Market snapshot refresh after stock sync failed: {exc}",
+            )
+        with db.no_autoflush:
+            refresh_market_status(db)
     db.commit()
+    clear_runtime_caches()
     return source, len(stocks), history_count, "success", None
 
 

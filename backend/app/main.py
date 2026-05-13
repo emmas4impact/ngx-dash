@@ -96,6 +96,25 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def prevent_api_response_caching(request: Request, call_next):
+    response = await call_next(request)
+    path = request.url.path
+    if (
+        path.startswith("/public/privacy-policy")
+        or path.startswith("/public/account-deletion")
+        or path.endswith("/logo")
+    ):
+        return response
+    response.headers.setdefault(
+        "Cache-Control",
+        "no-store, no-cache, max-age=0, must-revalidate",
+    )
+    response.headers.setdefault("Pragma", "no-cache")
+    response.headers.setdefault("Expires", "0")
+    return response
+
 MARKET_IDEAS_DISCLAIMER = (
     "Stockfolio NG highlights data-driven watchlist ideas only. "
     "It is not a financial adviser app. Contact your broker for detailed analysis."
@@ -126,8 +145,6 @@ def stock_history_needs_backfill(
     if not rows:
         return True
     if any(row.open_price is None for row in rows):
-        return True
-    if stock_history_is_stale(rows):
         return True
     if normalized_range == "all":
         oldest = min((row.trade_date for row in rows), default=None)
